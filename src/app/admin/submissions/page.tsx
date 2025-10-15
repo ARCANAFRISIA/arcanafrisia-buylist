@@ -1,6 +1,9 @@
 import prisma from "@/lib/prisma";
 type SubmissionStatus = "RECEIVED" | "CONFIRMED" | "PAID";
 
+const normalize = (s: string): SubmissionStatus =>
+  s === "RECEIVED" || s === "CONFIRMED" || s === "PAID" ? s : "RECEIVED";
+
 function statusClass(status: SubmissionStatus) {
   switch (status) {
     case "RECEIVED": return "bg-yellow-100 text-yellow-700";
@@ -46,7 +49,7 @@ export default async function AdminSubmissionsPage() {
                 <td className="p-2">{s.items.length}</td>
                 <td className="p-2">{(subtotalCents / 100).toFixed(2)}</td>
                 <td className="p-2">
-                  <span className={`px-2 py-1 rounded ${statusClass(s.status)}`}>
+                  <span className={`px-2 py-1 rounded ${statusClass(normalize(s.status))}`}>
                     {s.status}
                   </span>
                 </td>
