@@ -52,18 +52,18 @@ export async function PUT(
           status === "CONFIRMED"
             ? `
               <p>We hebben je buylist gecontroleerd en bevestigd.</p>
-              <p><b>Bedrag:</b> ${euro(totalCents)}</p>
+              <p><b>Bedrag:</b> ${euro(subtotalCents)}</p>
               <p>Je ontvangt een aparte bevestiging zodra de betaling is uitgevoerd.</p>
             `
             : status === "PAID"
             ? `
               <p>Je betaling is zojuist verzonden.</p>
-              <p><b>Bedrag:</b> ${euro(totalCents)}</p>
+              <p><b>Bedrag:</b> ${euro(subtotalCents)}</p>
               <p>Afhankelijk van je bank kan het 1–2 werkdagen duren voordat het zichtbaar is.</p>
             `
             : `
               <p>Je buylist status is gewijzigd naar <b>${status}</b>.</p>
-              <p><b>Indicatief totaal:</b> ${euro(totalCents)}</p>
+              <p><b>Indicatief totaal:</b> ${euro(subtotalCents)}</p>
             `;
 
         await sendMail({
