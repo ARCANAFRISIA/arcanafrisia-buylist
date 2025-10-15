@@ -13,7 +13,7 @@ function jsonSafe<T>(obj: T): T {
   );
 }
 
-xport async function PUT(
+export async function PUT(
   req: Request,
   { params }: { params: { id: string } }
 ) {
@@ -35,9 +35,11 @@ xport async function PUT(
     // ——— Mail (non-blocking) ———
     (async () => {
       try {
-        const totalCents =
-          Number(updated.serverTotalCents ?? 0) ||
-          updated.items.reduce((s, i) => s + Number(i.lineCents ?? 0), 0);
+        const subtotalCents =
+      (("subtotalCents" in updated) &&
+        typeof (updated as any).subtotalCents === "number" &&
+        (updated as any).subtotalCents) ||
+      updated.items.reduce((s, i) => s + (i.lineCents ?? 0), 0);
 
         const subject =
           status === "CONFIRMED"
