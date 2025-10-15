@@ -27,6 +27,19 @@ export async function POST(req: NextRequest) {
       )
     );
 
+    // Zorg dat ids een number[] is (filter alle onzin eruit)
+const raw = await req.json().catch(() => ({} as any));
+const ids: number[] = Array.isArray(raw?.ids)
+  ? raw.ids
+      .map((v) => (typeof v === "string" || typeof v === "number" ? Number(v) : NaN))
+      .filter((n) => Number.isFinite(n))
+  : [];
+
+if (ids.length === 0) {
+  return NextResponse.json({ ok: true, guides: [] }); // niets te doen
+}
+
+
     // Fetch guides by productId (DB column)
     const guides = await prisma.priceGuide.findMany({
       where: { productId: { in: ids }, isCurrent: true },
