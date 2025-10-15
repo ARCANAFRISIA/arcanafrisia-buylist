@@ -51,9 +51,7 @@ type LineItem = {
   lineCents?: number | null;
 };
 
-export function euro(cents: number) {
-  return `€${(cents / 100).toFixed(2)}`;
-}
+
 
 export function renderItemsTable(items: LineItem[]) {
   const rows = items
