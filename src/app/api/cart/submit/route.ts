@@ -105,13 +105,15 @@ export async function POST(req: NextRequest) {
             submissionId: submission.id,
             email: submission.email,
             totalCents,
-            items: submission.items.map((i) => ({
-  name: i.name ?? `#${i.productId}${i.isFoil ? " (Foil)" : ""}`,
-  qty: i.qty,
-  unitCents: Number(i.unitCents ?? 0),
-  lineCents: Number(i.lineCents ?? 0),
-})),
-
+            items: submission.items.map((i) => {
+  const label = `#${i.productId}${i.isFoil ? " (Foil)" : ""}`;
+  return {
+    name: label,
+    qty: i.qty,
+    unitCents: Number(i.unitCents ?? 0),
+    lineCents: Number(i.lineCents ?? 0),
+  };
+}),
           }),
           replyTo: process.env.MAIL_ADMIN, // handig als klant replyt
         });
@@ -126,21 +128,23 @@ export async function POST(req: NextRequest) {
             : submission.email; // dev-fallback zodat je iets ziet
 
         await sendMail({
-          to: adminTo,
-          subject: "Nieuwe buylist: " + submission.id,
-          html: internalNewSubmissionHtml({
-            submissionId: submission.id,
-            email: submission.email,
-            totalCents,
-            items: submission.items.map((i) => ({
-  name: i.name ?? `#${i.productId}${i.isFoil ? " (Foil)" : ""}`,
-  qty: i.qty,
-  unitCents: Number(i.unitCents ?? 0),
-  lineCents: Number(i.lineCents ?? 0),
-})),
-
-          }),
-        });
+  to: adminTo,
+  subject: "Nieuwe buylist: " + submission.id,
+  html: internalNewSubmissionHtml({
+    submissionId: submission.id,
+    email: submission.email,
+    totalCents,
+    items: submission.items.map((i) => {
+      const label = `#${i.productId}${i.isFoil ? " (Foil)" : ""}`;
+      return {
+        name: label,
+        qty: i.qty,
+        unitCents: Number(i.unitCents ?? 0),
+        lineCents: Number(i.lineCents ?? 0),
+      };
+    }),
+  }),
+});
       } catch (err) {
         console.error("Mail sending failed (non-blocking):", err);
       }
