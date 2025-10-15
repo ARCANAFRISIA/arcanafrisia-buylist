@@ -123,11 +123,11 @@ export async function POST(req: NextRequest) {
 }
         // interne notificatie
         const adminTo =
-          process.env.MAIL_ADMIN && process.env.MAIL_ADMIN.length > 3
-            ? process.env.MAIL_ADMIN
-            : null) ?? submission.email ?? process.env.MAIL_FROM ?? "info@arcanafrisia.com";
+  (process.env.MAIL_ADMIN && process.env.MAIL_ADMIN.length > 3
+    ? process.env.MAIL_ADMIN
+    : null) ?? submission.email ?? process.env.MAIL_FROM ?? "info@arcanafrisia.com";
 
-        await sendMail({
+   await sendMail({
   to: adminTo,
   subject: "Nieuwe buylist: " + submission.id,
   html: internalNewSubmissionHtml({
