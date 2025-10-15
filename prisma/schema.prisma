@@ -1,0 +1,82 @@
+// ---------- Prisma Client ----------
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ---------- Datasource ----------
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id        BigInt    @id
+  name      String
+  setCode   String?
+  lang      String    @default("EN")
+  isFoil    Boolean   @default(false)
+  scarcity  String?
+  cmTrend   Decimal? // <-- no @db.Decimal
+  cmTrendAt DateTime?
+}
+
+model PriceGuide {
+  id        String   @id @default(cuid())
+  productId Int
+  trend     Decimal?
+  trendFoil Decimal?
+  source    String?  @default("Cardmarket")
+  isCurrent Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([productId])
+}
+
+model Submission {
+  id     String  @id @default(cuid())
+  email  String?
+  status String  @default("RECEIVED") // enum -> String i.v.m. SQLite
+
+  // totals & policy snapshot (in centen)
+  subtotalCents    Int // som van lineCents
+  serverTotalCents Int // = subtotalCents, apart gelogd
+  clientTotalCents Int?
+  payoutPct        Int // 0..100
+  currency         String @default("EUR")
+  pricingSource    String @default("Cardmarket")
+
+  // Json niet ondersteund in SQLite -> tekstveld met JSON-string
+  metaText String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items SubmissionItem[]
+}
+
+model SubmissionItem {
+  id           String @id @default(cuid())
+  submissionId String
+
+  // Cardmarket product id; we houden geen relation aan Product aan (types verschillen toch)
+  productId BigInt
+  isFoil    Boolean @default(false)
+
+  qty Int
+
+  // snapshot van trends (centen)
+  trendCents     Int?
+  trendFoilCents Int?
+
+  // payout (centen)
+  unitCents Int
+  lineCents Int
+
+  // policy snapshot per regel (optioneel)
+  pct Int?
+
+  Submission Submission @relation(fields: [submissionId], references: [id])
+
+  @@index([submissionId])
+  @@index([productId])
+}
