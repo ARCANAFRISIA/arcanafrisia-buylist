@@ -1,6 +1,5 @@
 import prisma from "@/lib/prisma";
-import type { Prisma } from "@prisma/client";
-type SubmissionStatus = Prisma.$Enums.SubmissionStatus;
+type SubmissionStatus = "RECEIVED" | "CONFIRMED" | "PAID";
 
 function statusClass(status: SubmissionStatus) {
   switch (status) {
