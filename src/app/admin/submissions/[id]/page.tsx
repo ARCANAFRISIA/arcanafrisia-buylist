@@ -17,9 +17,10 @@ export default async function SubmissionDetail({
 
   if (!submission) return <div className="p-6">Niet gevonden.</div>;
 
-  const totalCents =
-    submission.totalCents ??
-    submission.items.reduce((sum, i) => sum + Number(i.lineCents ?? 0), 0);
+  const subtotalCents =
+  (("subtotalCents" in submission) && typeof (submission as any).subtotalCents === "number")
+    ? (submission as any).subtotalCents
+    : submission.items.reduce((sum, i) => sum + (i.lineCents ?? 0), 0);
 
   return (
     <div className="p-6 space-y-4">
@@ -31,7 +32,7 @@ export default async function SubmissionDetail({
           <b>Status:</b>
           <StatusForm id={submission.id} initialStatus={submission.status} />
         </div>
-        <p><b>Totaal:</b> €{(totalCents / 100).toFixed(2)}</p>
+        <p><b>Totaal:</b> €{(subtotalCents / 100).toFixed(2)}</p>
         <p><b>Aangemaakt:</b> {new Date(submission.createdAt).toLocaleString("nl-NL")}</p>
       </div>
 
