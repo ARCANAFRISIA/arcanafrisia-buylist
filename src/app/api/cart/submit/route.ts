@@ -131,9 +131,9 @@ export async function POST(req: NextRequest) {
   to: adminTo,
   subject: "Nieuwe buylist: " + submission.id,
   html: internalNewSubmissionHtml({
-    submissionId: submission.id,
-    email: submission.email,
-    totalCents,
+  submissionId: submission.id,
+  email: submission.email ?? "",  // ✅ altijd string (leeg als onbekend)
+  totalCents,
     items: submission.items.map((i) => {
       const label = `#${i.productId}${i.isFoil ? " (Foil)" : ""}`;
       return {
