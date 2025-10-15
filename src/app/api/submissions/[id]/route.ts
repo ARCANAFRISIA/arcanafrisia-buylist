@@ -66,18 +66,22 @@ export async function PUT(
               <p><b>Indicatief totaal:</b> ${euro(subtotalCents)}</p>
             `;
 
-        await sendMail({
-          to: updated.email,
-          subject,
-          html: `
-            <div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;line-height:1.5;">
-              <h2>${subject}</h2>
-              <p><b>Referentie:</b> ${updated.id}</p>
-              ${bodyHtml}
-              <p>Groet,<br/>Arcana Frisia</p>
-            </div>
-          `,
-        });
+        if (updated.email) {
+  await sendMail({
+    to: updated.email,          // ok: string
+    subject,
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;line-height:1.5;">
+        <h2>${subject}</h2>
+        <p><b>Referentie:</b> ${updated.id}</p>
+        ${bodyHtml}
+        <p>Groet,<br/>Arcana Frisia</p>
+      </div>
+    `,
+  });
+} else {
+  console.log("No customer email; skipping status-change mail", updated.id);
+}
       } catch (e) {
         console.error("status-change mail failed:", e);
       }
