@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { SubmissionStatus } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+type SubmissionStatus = Prisma.$Enums.SubmissionStatus;
 
 type Props = {
   id: string;
