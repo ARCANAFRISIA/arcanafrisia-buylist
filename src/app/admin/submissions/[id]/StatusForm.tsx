@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { SubmissionStatus } from "@prisma/client";
+type SubmissionStatus = "RECEIVED" | "CONFIRMED" | "PAID";
 
 type Props = {
   id: string;
