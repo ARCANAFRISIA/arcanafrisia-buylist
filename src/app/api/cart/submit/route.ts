@@ -97,6 +97,7 @@ export async function POST(req: NextRequest) {
     (async () => {
       try {
         // klantbevestiging
+      if (submission.email) {
         await sendMail({
           to: submission.email,
           subject: "Buylist ontvangen – referentie " + submission.id,
@@ -114,7 +115,10 @@ export async function POST(req: NextRequest) {
           }),
           replyTo: process.env.MAIL_ADMIN, // handig als klant replyt
         });
-
+} else {
+  // optioneel: loggen zodat je weet dat klantmail is geskipped
+  console.log("No customer email present; skipping confirmation for submission", submission.id);
+}
         // interne notificatie
         const adminTo =
           process.env.MAIL_ADMIN && process.env.MAIL_ADMIN.length > 3
