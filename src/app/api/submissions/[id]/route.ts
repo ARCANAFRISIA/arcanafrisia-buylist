@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
-import { PrismaClient, SubmissionStatus } from "@prisma/client";
+import prisma from "@/lib/prisma";
 import { sendMail, euro } from "@/lib/mail";
+
+type SubmissionStatus = "RECEIVED" | "CONFIRMED" | "PAID";
+const isValidStatus = (s: string): s is SubmissionStatus =>
+  s === "RECEIVED" || s === "CONFIRMED" || s === "PAID";
+
 
 function jsonSafe<T>(obj: T): T {
   return JSON.parse(
@@ -8,28 +13,23 @@ function jsonSafe<T>(obj: T): T {
   );
 }
 
-const prisma = new PrismaClient();
-
-// Pas eventueel de lijst aan als je "GRADING" al in je Prisma enum hebt.
-const ALLOWED: SubmissionStatus[] = ["RECEIVED", "CONFIRMED", "PAID"]; // of ["RECEIVED","CONFIRMED","GRADING","PAID"]
-
-export async function PUT(
+xport async function PUT(
   req: Request,
-  ctx: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = await ctx.params;
-    const body = await req.json();
-    const status = String(body?.status) as SubmissionStatus;
+    const body = await req.json().catch(() => ({} as any));
+    const statusRaw = String(body?.status ?? "");
 
-    if (!ALLOWED.includes(status)) {
+    if (!isValidStatus(statusRaw)) {
       return NextResponse.json({ error: "Invalid status" }, { status: 400 });
     }
+    const status: SubmissionStatus = statusRaw;
 
     const updated = await prisma.submission.update({
-      where: { id },
+      where: { id: params.id },
       data: { status },
-      include: { items: true },
+      include: { items: true }, // nodig voor totals / mails
     });
 
     // ——— Mail (non-blocking) ———
