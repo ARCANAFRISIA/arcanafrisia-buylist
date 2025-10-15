@@ -1,5 +1,6 @@
-import { PrismaClient, SubmissionStatus } from "@prisma/client";
-const prisma = new PrismaClient();
+import prisma from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
+type SubmissionStatus = Prisma.$Enums.SubmissionStatus;
 
 function statusClass(status: SubmissionStatus) {
   switch (status) {
