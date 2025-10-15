@@ -21,19 +21,24 @@ export async function POST(req: NextRequest) {
     }
 
     // Collect requested product IDs (client sends idProduct)
-    const ids = Array.from(
-      new Set(
-        items.map((i: any) => Number(i.idProduct)).filter(Number.isInteger)
+   // ✅ Maak veilig een number[] met productIds uit body.items
+const ids: number[] = Array.from(
+  new Set(
+    (Array.isArray(items) ? items : [])
+      .map((i: any) =>
+        typeof i?.idProduct === "number" || typeof i?.idProduct === "string"
+          ? Number(i.idProduct)
+          : NaN
       )
-    );
-
-    // Zorg dat ids een number[] is (filter alle onzin eruit)
-const raw = await req.json().catch(() => ({} as any));
-const ids: number[] = Array.isArray(raw?.ids)
-  ? raw.ids
-      .map((v) => (typeof v === "string" || typeof v === "number" ? Number(v) : NaN))
       .filter((n) => Number.isFinite(n))
-  : [];
+  )
+);
+
+if (ids.length === 0) {
+  // niks te doen (houd dezelfde shape aan als je huidige response)
+  return NextResponse.json({ ok: true, guides: [] });
+}
+
 
 if (ids.length === 0) {
   return NextResponse.json({ ok: true, guides: [] }); // niets te doen
