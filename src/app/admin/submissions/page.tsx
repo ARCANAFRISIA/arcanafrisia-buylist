@@ -34,16 +34,17 @@ export default async function AdminSubmissionsPage() {
         </thead>
         <tbody>
           {submissions.map((s) => {
-            const totalCents =
-              s.totalCents ??
-              s.items.reduce((sum, i) => sum + Number(i.lineCents ?? 0), 0);
+            const subtotalCents =
+  (("subtotalCents" in s) && typeof (s as any).subtotalCents === "number")
+    ? (s as any).subtotalCents
+    : s.items.reduce((sum, i) => sum + (i.lineCents ?? 0), 0);
 
             return (
               <tr key={s.id} className="border-t">
                 <td className="p-2">{s.id}</td>
                 <td className="p-2">{s.email}</td>
                 <td className="p-2">{s.items.length}</td>
-                <td className="p-2">{(totalCents / 100).toFixed(2)}</td>
+                <td className="p-2">{(subtotalCents / 100).toFixed(2)}</td>
                 <td className="p-2">
                   <span className={`px-2 py-1 rounded ${statusClass(s.status)}`}>
                     {s.status}
