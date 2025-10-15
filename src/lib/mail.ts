@@ -1,29 +1,27 @@
 import { Resend } from "resend";
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
-const MAIL_FROM = process.env.MAIL_FROM || "Buylist <no-reply@localhost>";
-const MAIL_ADMIN = process.env.MAIL_ADMIN || "";
-
-const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
-
-export type MailPayload = {
+type MailPayload = {
   to: string | string[];
   subject: string;
   html: string;
   text?: string;
-  replyTo?: string;
+  replyTo?: string | string[];
 };
 
+const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+const MAIL_FROM = process.env.MAIL_FROM || "Buylist <no-reply@localhost>";
+
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
+
 export async function sendMail(payload: MailPayload) {
-  // Fallback voor dev zonder sleutel: netjes loggen i.p.v. falen
   if (!resend) {
-    console.log("—".repeat(60));
-    console.log("MAIL (DEV LOG) →", Array.isArray(payload.to) ? payload.to.join(", ") : payload.to);
+    console.log("-".repeat(60));
+    console.log("MAIL (DEV LOG) to:", Array.isArray(payload.to) ? payload.to.join(", ") : payload.to);
     console.log("SUBJECT:", payload.subject);
     console.log("FROM:", MAIL_FROM);
     if (payload.replyTo) console.log("REPLY-TO:", payload.replyTo);
-    console.log("HTML:\n", payload.html);
-    console.log("—".repeat(60));
+    console.log("HTML\n", payload.html);
+    console.log("-".repeat(60));
     return { ok: true, id: "dev-log" };
   }
 
@@ -33,12 +31,16 @@ export async function sendMail(payload: MailPayload) {
     subject: payload.subject,
     html: payload.html,
     text: payload.text,
-    reply_to: payload.replyTo,
+    replyTo: payload.replyTo,   // 👈 fix
   });
 
-  if (result.error) throw new Error(result.error.message);
-  return { ok: true, id: result.data?.id || "" };
+  if ((result as any)?.error) throw new Error((result as any).error.message);
+  return { ok: true, id: (result as any)?.data?.id || "" };
 }
+
+export const euro = (cents: number) =>
+  (cents / 100).toLocaleString("nl-NL", { style: "currency", currency: "EUR" });
+
 
 /* --------- Templates --------- */
 
