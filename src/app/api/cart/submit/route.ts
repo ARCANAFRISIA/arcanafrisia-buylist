@@ -125,7 +125,7 @@ export async function POST(req: NextRequest) {
         const adminTo =
           process.env.MAIL_ADMIN && process.env.MAIL_ADMIN.length > 3
             ? process.env.MAIL_ADMIN
-            : submission.email; // dev-fallback zodat je iets ziet
+            : null) ?? submission.email ?? process.env.MAIL_FROM ?? "info@arcanafrisia.com";
 
         await sendMail({
   to: adminTo,
