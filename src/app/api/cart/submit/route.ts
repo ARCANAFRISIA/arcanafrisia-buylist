@@ -120,17 +120,19 @@ export async function POST(req: NextRequest) {
   serverTotalCents,                     // authoritative (in cents)
   subtotalCents: serverTotalCents,      // <-- vereist door jouw schema
   items: {
-    create: filtered.map((r) => ({
-      productId: BigInt(r.idProduct),
-      isFoil: r.isFoil,
-      qty: r.qty,
-      trendCents: r.trend != null ? Math.round(r.trend * 100) : null,
-      unitCents: Math.round(r.unit * 100),
-      lineCents: r.lineCents,
-      cond: r.cond,
-      condMult: r.condMult,
-      payoutPct: payoutPctInt,
-    })),
+  create: filtered.map((r) => ({
+    productId: BigInt(r.idProduct),
+    isFoil: r.isFoil,
+    qty: r.qty,
+    trendCents: r.trend != null ? Math.round(r.trend * 100) : null,
+    unitCents: Math.round(r.unit * 100),
+    lineCents: r.lineCents,
+    // use the column your schema actually has:
+    // if your column is named `pct` (common in your older code), use:
+    pct: payoutPctInt,
+    // if your schema DOES have `payoutPct` on items, use the line below instead and delete the `pct:` line:
+    // payoutPct: payoutPctInt,
+  })),
   },
   metaText: JSON.stringify({
     clientTotalCents,
