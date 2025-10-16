@@ -1,3 +1,4 @@
+import { unstable_noStore as noStore } from "next/cache";
 export const dynamic = "force-dynamic";
 import { PrismaClient } from "@prisma/client";
 import StatusEditor from "../StatusEditor";
@@ -5,6 +6,7 @@ import StatusEditor from "../StatusEditor";
 const prisma = new PrismaClient();
 
 export default async function Page({ params }: { params: { id: string } }) {
+  noStore();
   const submission = await prisma.submission.findUnique({
     where: { id: params.id },
     include: { items: true },
