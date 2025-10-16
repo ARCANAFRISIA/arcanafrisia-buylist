@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
     const submission = await prisma.submission.create({
       data: {
         email,
-        payoutPctUsed: payoutPct,                         // snapshot als fraction (0.70)
+        payoutPct: payoutPctInt,                         // snapshot als fraction (0.70)
         clientTotal: clientTotalCents / 100,              // optioneel: referentie
         serverTotalCents,                                 // authoritative
         items: {
