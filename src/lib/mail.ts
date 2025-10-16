@@ -1,12 +1,15 @@
 // src/lib/mail.ts
 export const runtime = "nodejs";
+
 import { Resend } from "resend";
 
 if (!process.env.RESEND_API_KEY) {
   console.warn("[mail] RESEND_API_KEY is missing");
 }
+
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+// ---------- core sender ----------
 type SendMailArgs = {
   to?: string | string[];
   subject: string;
@@ -25,8 +28,8 @@ export async function sendMail(args: SendMailArgs) {
   }
   const to = args.to ?? fallbackTo;
   if (!to) {
-    console.warn("[mail] skipped: no recipient");
-    return { skipped: true };
+    console.warn("[mail] skipped: no recipient (no to / MAIL_ADMIN / MAIL_FROM)");
+    return { skipped: true as const };
   }
 
   const res = await resend.emails.send({
@@ -37,16 +40,12 @@ export async function sendMail(args: SendMailArgs) {
     text: args.text,
     reply_to: args.replyTo,
   });
+
   console.log("[mail] sent:", { to, subject: args.subject, id: (res as any)?.id ?? null });
   return res;
 }
 
-export function euro(cents: number | null | undefined): string {
-  const n = typeof cents === "number" ? cents : 0;
-  return `€ ${(n / 100).toFixed(2)}`;
-}
-// --- helpers & templates (exports die je route verwacht) ---
-
+// ---------- helpers (single definitions!) ----------
 export function euro(cents: number | null | undefined): string {
   const n = typeof cents === "number" ? cents : 0;
   return `€ ${(n / 100).toFixed(2)}`;
@@ -56,7 +55,7 @@ function esc(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// Client confirmation email
+// ---------- HTML templates ----------
 export function customerConfirmationHtml(args: {
   submissionId: string | number;
   email: string;
@@ -105,7 +104,6 @@ export function customerConfirmationHtml(args: {
   </div>`;
 }
 
-// Internal notification email
 export function internalNewSubmissionHtml(args: {
   submissionId: string | number;
   email: string;
