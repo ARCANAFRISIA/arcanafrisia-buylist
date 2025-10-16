@@ -1,118 +1,85 @@
 import { PrismaClient } from "@prisma/client";
 import StatusEditor from "../StatusEditor";
 
-
-
-
-
-
-  async function save() {
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/submissions/${id}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status, message: message.trim() || undefined }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data?.ok) throw new Error(data?.error || "Opslaan mislukt");
-      // optioneel: toast
-    } catch (e:any) {
-      alert(e.message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="flex flex-wrap gap-2 items-center">
-      <select
-        className="border rounded px-2 py-1 text-sm"
-        value={status}
-        onChange={(e)=> setStatus(e.target.value)}
-      >
-        {options.map(o => <option key={o} value={o}>{o}</option>)}
-      </select>
-      <input
-        className="border rounded px-2 py-1 text-sm w-64"
-        placeholder="Bericht aan klant (optioneel)"
-        value={message}
-        onChange={(e)=> setMessage(e.target.value)}
-      />
-      <button
-        onClick={save}
-        className="border rounded px-3 py-1 text-sm"
-        disabled={saving}
-      >
-        {saving ? "Opslaan…" : "Opslaan"}
-      </button>
-    </div>
-  );
-}
-
-
 const prisma = new PrismaClient();
 
-export default async function SubmissionDetail({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params; // 👈 params awaiten
-
+export default async function Page({ params }: { params: { id: string } }) {
   const submission = await prisma.submission.findUnique({
-    where: { id },
+    where: { id: params.id },
     include: { items: true },
   });
 
-  if (!submission) return <div className="p-6">Niet gevonden.</div>;
+  if (!submission) {
+    return (
+      <div className="mx-auto max-w-4xl p-6">
+        <h1 className="text-xl font-semibold">Submission niet gevonden</h1>
+        <p className="text-sm opacity-70">ID: {params.id}</p>
+      </div>
+    );
+  }
 
-  const subtotalCents =
-  (("subtotalCents" in submission) && typeof (submission as any).subtotalCents === "number")
-    ? (submission as any).subtotalCents
-    : submission.items.reduce((sum, i) => sum + (i.lineCents ?? 0), 0);
+  const totalCents =
+    Number(submission.serverTotalCents ?? 0) ||
+    submission.items.reduce((s, i) => s + Number(i.lineCents ?? 0), 0);
 
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-bold">Buylist #{submission.id}</h1>
-
-      <div className="space-y-1">
-        <p><b>Email:</b> {submission.email}</p>
-        <div className="flex items-center gap-2">
-          <b>Status:</b>
-          <StatusEditor
-  id={submission.id}
-  initialStatus={submission.status ?? "RECEIVED"}
-/>
-
+    <div className="mx-auto max-w-4xl p-6 space-y-6">
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">Submission {submission.id}</h1>
+          <p className="text-sm opacity-70">
+            {submission.email ?? "—"} · status: {submission.status}
+          </p>
         </div>
-        <p><b>Totaal:</b> €{(subtotalCents / 100).toFixed(2)}</p>
-        <p><b>Aangemaakt:</b> {new Date(submission.createdAt).toLocaleString("nl-NL")}</p>
-      </div>
+        <div className="text-right text-sm">
+          <div>Totaal (server): € {(totalCents / 100).toFixed(2)}</div>
+          <div className="opacity-70">
+            Items: {submission.items.length}
+          </div>
+        </div>
+      </header>
 
-      <h2 className="text-xl font-semibold mt-4">Items</h2>
-      <table className="min-w-full text-sm border">
-        <thead className="bg-gray-100">
-          <tr>
-            <th className="p-2 text-left">Naam</th>
-            <th className="p-2 text-left">Qty</th>
-            <th className="p-2 text-left">Unit (€)</th>
-            <th className="p-2 text-left">Lijn (€)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {submission.items.map((i) => (
-            <tr key={i.id} className="border-t">
-              <td className="p-2">
-  {`CM#${String(i.productId)}${i.isFoil ? " (Foil)" : ""}`}
-</td>
-              <td className="p-2">{i.qty}</td>
-              <td className="p-2">{(Number(i.unitCents ?? 0) / 100).toFixed(2)}</td>
-              <td className="p-2">{(Number(i.lineCents ?? 0) / 100).toFixed(2)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {/* Status wijzigen + klant notificeren */}
+      <section className="rounded-2xl border p-4">
+        <h2 className="mb-2 font-semibold">Status & bericht</h2>
+        <StatusEditor
+          id={submission.id}
+          initialStatus={submission.status ?? "RECEIVED"}
+        />
+      </section>
+
+      {/* Eenvoudige items weergave */}
+      <section className="rounded-2xl border p-4">
+        <h2 className="mb-2 font-semibold">Items</h2>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-gray-50">
+                <th className="px-2 py-2 text-left">productId</th>
+                <th className="px-2 py-2 text-left">Foil</th>
+                <th className="px-2 py-2 text-right">Qty</th>
+                <th className="px-2 py-2 text-right">Unit</th>
+                <th className="px-2 py-2 text-right">Line</th>
+              </tr>
+            </thead>
+            <tbody>
+              {submission.items.map((i) => (
+                <tr key={String(i.id)} className="border-b">
+                  <td className="px-2 py-2">#{String(i.productId)}</td>
+                  <td className="px-2 py-2">{i.isFoil ? "Foil" : "—"}</td>
+                  <td className="px-2 py-2 text-right">{i.qty}</td>
+                  <td className="px-2 py-2 text-right">
+                    € {((Number(i.unitCents ?? 0)) / 100).toFixed(2)}
+                  </td>
+                  <td className="px-2 py-2 text-right">
+                    € {((Number(i.lineCents ?? 0)) / 100).toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
