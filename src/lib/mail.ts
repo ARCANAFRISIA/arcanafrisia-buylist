@@ -32,14 +32,27 @@ export async function sendMail(args: SendMailArgs) {
     return { skipped: true as const };
   }
 
-  const res = await resend.emails.send({
-    from,
-    to,
-    subject: args.subject,
-    html: args.html,
-    text: args.text,
-    replyTo: args.replyTo,
-  });
+  // simpele html→text fallback (houdt het type van Resend tevreden)
+function htmlToText(html?: string) {
+  if (!html) return "";
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const res = await resend.emails.send({
+  from,
+  to,
+  subject: args.subject,
+  html: args.html,
+  // Resend types verlangen text: string — nooit undefined meegeven
+  text: args.text ?? htmlToText(args.html),
+  replyTo: args.replyTo,
+});
+
 
   console.log("[mail] sent:", { to, subject: args.subject, id: (res as any)?.id ?? null });
   return res;
