@@ -38,7 +38,7 @@ export async function sendMail(args: SendMailArgs) {
     subject: args.subject,
     html: args.html,
     text: args.text,
-    reply_to: args.replyTo,
+    replyTo: args.replyTo,
   });
 
   console.log("[mail] sent:", { to, subject: args.subject, id: (res as any)?.id ?? null });
