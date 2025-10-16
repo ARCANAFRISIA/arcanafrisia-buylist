@@ -152,11 +152,11 @@ export async function POST(req: NextRequest) {
     // klant
     try {
       await sendMail({
-        to: submission.email,
+        to: submission.email ?? undefined,
         subject: "Buylist bevestigd – referentie " + submission.id,
         html: customerConfirmationHtml({
           submissionId: submission.id,
-          email: submission.email,
+          email: submission.email ?? "",
           totalCents,
           items: submission.items.map((i) => {
             const label = `#${i.productId}${i.isFoil ? " (Foil)" : ""}`;
