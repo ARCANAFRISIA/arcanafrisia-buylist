@@ -115,30 +115,30 @@ export async function POST(req: NextRequest) {
     // ---- wegschrijven ----
     const submission = await prisma.submission.create({
   data: {
-    email,
-    payoutPct: payoutPctInt,              // bv. 70
-    serverTotalCents,                     // authoritative (in cents)
-    items: {
-      create: filtered.map((r) => ({
-        productId: BigInt(r.idProduct),
-        isFoil: r.isFoil,
-        qty: r.qty,
-        trendCents: r.trend != null ? Math.round(r.trend * 100) : null,
-        unitCents: Math.round(r.unit * 100),
-        lineCents: r.lineCents,
-        cond: r.cond,
-        condMult: r.condMult,
-        payoutPct: payoutPctInt,          // bv. 70
-      })),
-    },
-    // clientTotal blijft als metadata bewaard
-    metaText: JSON.stringify({
-      clientTotalCents,
-      itemsLength: items.length,
-      receivedAt: new Date().toISOString(),
-    }),
-    currency: "EUR",
-    pricingSource: "Cardmarket",
+  email,
+  payoutPct: payoutPctInt,              // bv. 70
+  serverTotalCents,                     // authoritative (in cents)
+  subtotalCents: serverTotalCents,      // <-- vereist door jouw schema
+  items: {
+    create: filtered.map((r) => ({
+      productId: BigInt(r.idProduct),
+      isFoil: r.isFoil,
+      qty: r.qty,
+      trendCents: r.trend != null ? Math.round(r.trend * 100) : null,
+      unitCents: Math.round(r.unit * 100),
+      lineCents: r.lineCents,
+      cond: r.cond,
+      condMult: r.condMult,
+      payoutPct: payoutPctInt,
+    })),
+  },
+  metaText: JSON.stringify({
+    clientTotalCents,
+    itemsLength: items.length,
+    receivedAt: new Date().toISOString(),
+  }),
+  currency: "EUR",
+  pricingSource: "Cardmarket",
   },
   include: { items: true },
 });
