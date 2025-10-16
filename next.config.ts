@@ -1,16 +1,10 @@
-import type { NextConfig } from "next";
+// next.config.ts
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  /* config options here */
-};
-
-export default nextConfig;
-
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  async redirects() {
+  async rewrites() {
     return [
-      { source: '/', destination: '/buylist', permanent: true },
+      { source: '/', destination: '/buylist' },
     ];
   },
 };
