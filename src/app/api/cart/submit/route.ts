@@ -1,166 +1,214 @@
-export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { sendMail, customerConfirmationHtml, internalNewSubmissionHtml } from "@/lib/mail"; // ⬅️ nieuw
+import { sendMail, customerConfirmationHtml, internalNewSubmissionHtml } from "@/lib/mail";
+import { getPayoutPct } from "@/lib/config";
 
-const DEFAULT_PCT = 60;        // %
+// ---- instellingen (alleen floor/cap hier) ----
 const MIN_PAYOUT_EUR = 0.05;   // floor
 const MAX_PAYOUT_EUR = 250;    // cap
+
+type CondKey = "NMEX" | "GDLP";
+const COND_MULT: Record<CondKey, number> = {
+  NMEX: 1.0, // NM/EX
+  GDLP: 0.9, // GD/LP → 10% minder
+};
+
+// Prisma Decimal → number
+function decToNum(v: unknown): number | null {
+  if (v == null) return null;
+  if (typeof v === "number") return v;
+  const n = Number((v as any).toString?.() ?? v);
+  return Number.isFinite(n) ? n : null;
+}
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export async function POST(req: NextRequest) {
   try {
     const { email, items, meta } = await req.json();
-    if (!email || typeof email !== "string") {
-      return NextResponse.json({ ok: false, error: "E-mailadres vereist" }, { status: 400 });
+
+    // ---- validatie ----
+    if (!email || typeof email !== "string" || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      return NextResponse.json({ ok: false, error: "E-mailadres vereist of ongeldig" }, { status: 400 });
     }
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ ok: false, error: "Leeg mandje" }, { status: 400 });
     }
 
-    const pct = Number(meta?.percent ?? DEFAULT_PCT);
-    const factor = (Number.isFinite(pct) && pct > 0 ? pct : DEFAULT_PCT) / 100;
+    // ---- payout% op de SERVER (snapshottable) ----
+    // negeer client percent; gebruik env/config zodat de server leidend is
+    const payoutPct = getPayoutPct();            // bv. 0.70
+    const payoutPctInt = Math.round(payoutPct * 100); // bv. 70
 
+    // ---- productIds verzamelen ----
     const ids = Array.from(
-      new Set(items.map((i: any) => Number(i.idProduct)).filter(Number.isInteger))
-    );
+      new Set(
+        items
+          .map((i: any) => (typeof i?.idProduct === "number" || typeof i?.idProduct === "string" ? Number(i.idProduct) : NaN))
+          .filter((n) => Number.isFinite(n))
+      )
+    ) as number[];
 
+    if (ids.length === 0) {
+      return NextResponse.json({ ok: false, error: "Geen geldige idProduct waardes" }, { status: 400 });
+    }
+
+    // ---- trends ophalen (EUR, raw) ----
     const guides = await prisma.priceGuide.findMany({
       where: { productId: { in: ids }, isCurrent: true },
+      select: { productId: true, trend: true, trendFoil: true },
     });
-    const byId = new Map<number, (typeof guides)[number]>();
-    for (const g of guides) byId.set(g.productId as number, g);
 
-    const pricedItems = items.map((it: any) => {
-      const idProduct = Number(it.idProduct);
-      const isFoil = Boolean(it.isFoil);
-      const qty = Math.max(1, Number(it.qty) || 1);
+    const byId = new Map<number, { trend: number | null; trendFoil: number | null }>();
+    for (const g of guides) {
+      byId.set(g.productId as number, {
+        trend: decToNum(g.trend),
+        trendFoil: decToNum(g.trendFoil),
+      });
+    }
 
-      const g = byId.get(idProduct);
-      const base = Number(g?.trend ?? 0);
-      const foilSpecific = g?.trendFoil == null ? null : Number(g.trendFoil);
-      const trend = isFoil ? (foilSpecific ?? base) : base;
+    // ---- serverberekening per regel ----
+    type InItem = { idProduct: number | string; isFoil: boolean; qty: number; cond?: CondKey };
+    const computed = (items as InItem[]).map((raw) => {
+      const idProduct = Number(raw.idProduct);
+      const isFoil = Boolean(raw.isFoil);
+      const qty = Math.max(1, Number(raw.qty) || 1);
+      const cond = (raw.cond ?? "NMEX") as CondKey;
+      const condMult = COND_MULT[cond] ?? 1.0;
 
-      let unit = round2(trend * factor);
+      const rec = byId.get(idProduct);
+      const base = rec?.trend ?? 0; // non-foil
+      const foil = rec?.trendFoil;  // foil kan null zijn
+      const trend = isFoil ? (foil ?? base) : base; // EUR
+
+      // unit = trend × server-payout × conditie
+      let unit = round2((trend || 0) * payoutPct * condMult);
       if (unit < MIN_PAYOUT_EUR) unit = 0;
       if (unit > MAX_PAYOUT_EUR) unit = MAX_PAYOUT_EUR;
 
-      const available = !!g && trend > 0 && unit >= MIN_PAYOUT_EUR;
-      const lineTotal = round2(unit * qty);
+      const available = !!rec && (trend || 0) > 0 && unit >= MIN_PAYOUT_EUR;
+      const line = round2(unit * qty);
 
-      return { idProduct, isFoil, qty, unit, available, trend, pct, lineTotal };
+      return {
+        idProduct,
+        isFoil,
+        qty,
+        cond,
+        trend,              // EUR
+        payoutPct,          // snapshot (0–1)
+        condMult,           // snapshot
+        unit,               // EUR
+        lineCents: Math.round(line * 100),
+        available,
+      };
     });
 
-    // Alleen regels die we daadwerkelijk uitbetalen
-    const filtered = pricedItems.filter((r) => r.available && r.unit > 0);
+    // alleen regels die we daadwerkelijk uitbetalen
+    const filtered = computed.filter((r) => r.available && r.unit > 0);
 
-    // totals
-    const serverTotal = round2(filtered.reduce((s, r) => s + r.unit * r.qty, 0));
-    const serverTotalCents = Math.round(serverTotal * 100);
-    const clientTotalCents = Math.round(Number(meta?.clientTotal ?? 0) * 100);
-    const payoutPctInt = Math.round(Number(pct)); // bv. 60/67/70
+    // totals (server-authoritative)
+    const serverTotalCents = filtered.reduce((s, r) => s + r.lineCents, 0);
+    const clientTotalCents = Math.round(Number(meta?.clientTotal ?? 0) * 100); // puur als referentie
 
+    // ---- wegschrijven ----
     const submission = await prisma.submission.create({
       data: {
         email,
-        subtotalCents: serverTotalCents,
-        serverTotalCents,
-        clientTotalCents,
-        payoutPct: payoutPctInt,
-        currency: "EUR",
-        pricingSource: "Cardmarket",
-        metaText: JSON.stringify({ requestedPercent: meta?.percent ?? pct }), // JSON als tekst
+        payoutPctUsed: payoutPct,                         // snapshot als fraction (0.70)
+        clientTotal: clientTotalCents / 100,              // optioneel: referentie
+        serverTotalCents,                                 // authoritative
         items: {
           create: filtered.map((r) => ({
             productId: BigInt(r.idProduct),
             isFoil: r.isFoil,
             qty: r.qty,
-            trendCents: r.trend != null ? Math.round(Number(r.trend) * 100) : null,
-            trendFoilCents:
-              r.isFoil && r.trend != null ? Math.round(Number(r.trend) * 100) : null,
+            trendCents: r.trend != null ? Math.round(r.trend * 100) : null,
             unitCents: Math.round(r.unit * 100),
-            lineCents: Math.round(r.unit * r.qty * 100),
-            pct: payoutPctInt,
+            lineCents: r.lineCents,
+            cond: r.cond,
+            condMult: r.condMult,
+            payoutPct: payoutPctInt,                      // bv. 70
           })),
         },
+        metaText: JSON.stringify({
+          clientTotalCents,
+          itemsLength: items.length,
+          receivedAt: new Date().toISOString(),
+        }),
+        currency: "EUR",
+        pricingSource: "Cardmarket",
       },
       include: { items: true },
     });
 
-    // --- MAILS: non-blocking, best-effort ---
-    // fallback totaal (voor het geval totalCents ooit null is)
+    // ---- mails (best-effort, met logging) ----
     const totalCents =
       Number(submission.serverTotalCents ?? 0) ||
       submission.items.reduce((s, i) => s + Number(i.lineCents ?? 0), 0);
 
-    (async () => {
-      try {
-        // klantbevestiging
-      if (submission.email) {
-        await sendMail({
-          to: submission.email,
-          subject: "Buylist ontvangen – referentie " + submission.id,
-          html: customerConfirmationHtml({
-            submissionId: submission.id,
-            email: submission.email,
-            totalCents,
-            items: submission.items.map((i) => {
-  const label = `#${i.productId}${i.isFoil ? " (Foil)" : ""}`;
-  return {
-    name: label,
-    qty: i.qty,
-    unitCents: Number(i.unitCents ?? 0),
-    lineCents: Number(i.lineCents ?? 0),
-  };
-}),
+    // klant
+    try {
+      await sendMail({
+        to: submission.email,
+        subject: "Buylist bevestigd – referentie " + submission.id,
+        html: customerConfirmationHtml({
+          submissionId: submission.id,
+          email: submission.email,
+          totalCents,
+          items: submission.items.map((i) => {
+            const label = `#${i.productId}${i.isFoil ? " (Foil)" : ""}`;
+            return {
+              name: label,
+              qty: i.qty,
+              unitCents: Number(i.unitCents ?? 0),
+              lineCents: Number(i.lineCents ?? 0),
+            };
           }),
-          replyTo: process.env.MAIL_ADMIN, // handig als klant replyt
-        });
-} else {
-  // optioneel: loggen zodat je weet dat klantmail is geskipped
-  console.log("No customer email present; skipping confirmation for submission", submission.id);
-}
-        // interne notificatie
-        const adminTo =
-  (process.env.MAIL_ADMIN && process.env.MAIL_ADMIN.length > 3
-    ? process.env.MAIL_ADMIN
-    : null) ?? submission.email ?? process.env.MAIL_FROM ?? "info@arcanafrisia.com";
+        }),
+        replyTo: process.env.MAIL_ADMIN,
+      });
+      console.log("[submit] customer mail sent");
+    } catch (e) {
+      console.warn("[submit] customer mail failed (non-blocking):", e);
+    }
 
-   await sendMail({
-  to: adminTo,
-  subject: "Nieuwe buylist: " + submission.id,
-  html: internalNewSubmissionHtml({
-  submissionId: submission.id,
-  email: submission.email ?? "",  // ✅ altijd string (leeg als onbekend)
-  totalCents,
-    items: submission.items.map((i) => {
-      const label = `#${i.productId}${i.isFoil ? " (Foil)" : ""}`;
-      return {
-        name: label,
-        qty: i.qty,
-        unitCents: Number(i.unitCents ?? 0),
-        lineCents: Number(i.lineCents ?? 0),
-      };
-    }),
-  }),
-});
-      } catch (err) {
-        console.error("Mail sending failed (non-blocking):", err);
-      }
-    })();
-    // --- EINDE MAILS ---
+    // admin
+    try {
+      await sendMail({
+        // geen 'to' meegeven → lib/mail.ts valt terug op MAIL_ADMIN/MAIL_FROM
+        subject: "Buylist ontvangen – " + submission.id,
+        html: internalNewSubmissionHtml({
+          submissionId: submission.id,
+          email: submission.email ?? "",
+          totalCents,
+          items: submission.items.map((i) => {
+            const label = `#${i.productId}${i.isFoil ? " (Foil)" : ""}`;
+            return {
+              name: label,
+              qty: i.qty,
+              unitCents: Number(i.unitCents ?? 0),
+              lineCents: Number(i.lineCents ?? 0),
+            };
+          }),
+        }),
+        replyTo: submission.email ?? undefined,
+      });
+      console.log("[submit] admin mail sent");
+    } catch (e) {
+      console.warn("[submit] admin mail failed (non-blocking):", e);
+    }
 
-    const payload = jsonSafe({ ok: true, submission });
-    return NextResponse.json(payload);
+    // ---- response ----
+    return NextResponse.json(jsonSafe({ ok: true, submission }));
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e.message }, { status: 500 });
+    console.error("[submit] error:", e);
+    return NextResponse.json({ ok: false, error: e?.message || "Internal error" }, { status: 500 });
   }
 }
 
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
-}
+// JSON helper (BigInt → number)
 function jsonSafe<T>(obj: T): T {
   return JSON.parse(
     JSON.stringify(obj, (_k, v) => (typeof v === "bigint" ? Number(v) : v))
