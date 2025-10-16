@@ -1,5 +1,60 @@
 import { PrismaClient } from "@prisma/client";
-import StatusForm from "./StatusForm";
+import StatusEditor from "../StatusEditor";
+
+
+"use client";
+import * as React from "react";
+
+function StatusEditor({ id, initialStatus }: { id: string; initialStatus: string }) {
+  const [status, setStatus] = React.useState(initialStatus || "RECEIVED");
+  const [message, setMessage] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  const options = ["RECEIVED","GRADING","ADJUSTED","APPROVED","REJECTED","PAID"];
+
+  async function save() {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/submissions/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, message: message.trim() || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(data?.error || "Opslaan mislukt");
+      // optioneel: toast
+    } catch (e:any) {
+      alert(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2 items-center">
+      <select
+        className="border rounded px-2 py-1 text-sm"
+        value={status}
+        onChange={(e)=> setStatus(e.target.value)}
+      >
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+      <input
+        className="border rounded px-2 py-1 text-sm w-64"
+        placeholder="Bericht aan klant (optioneel)"
+        value={message}
+        onChange={(e)=> setMessage(e.target.value)}
+      />
+      <button
+        onClick={save}
+        className="border rounded px-3 py-1 text-sm"
+        disabled={saving}
+      >
+        {saving ? "Opslaan…" : "Opslaan"}
+      </button>
+    </div>
+  );
+}
+
 
 const prisma = new PrismaClient();
 
@@ -30,7 +85,11 @@ export default async function SubmissionDetail({
         <p><b>Email:</b> {submission.email}</p>
         <div className="flex items-center gap-2">
           <b>Status:</b>
-          <StatusForm id={submission.id} initialStatus={submission.status} />
+          <StatusEditor
+  id={submission.id}
+  initialStatus={submission.status ?? "RECEIVED"}
+/>
+
         </div>
         <p><b>Totaal:</b> €{(subtotalCents / 100).toFixed(2)}</p>
         <p><b>Aangemaakt:</b> {new Date(submission.createdAt).toLocaleString("nl-NL")}</p>
