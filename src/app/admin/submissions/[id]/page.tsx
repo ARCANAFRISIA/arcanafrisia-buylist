@@ -2,14 +2,9 @@ import { PrismaClient } from "@prisma/client";
 import StatusEditor from "../StatusEditor";
 
 
-"use client";
-import * as React from "react";
 
-function StatusEditor({ id, initialStatus }: { id: string; initialStatus: string }) {
-  const [status, setStatus] = React.useState(initialStatus || "RECEIVED");
-  const [message, setMessage] = React.useState("");
-  const [saving, setSaving] = React.useState(false);
-  const options = ["RECEIVED","GRADING","ADJUSTED","APPROVED","REJECTED","PAID"];
+
+
 
   async function save() {
     setSaving(true);
