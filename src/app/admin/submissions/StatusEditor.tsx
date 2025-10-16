@@ -1,15 +1,16 @@
 "use client";
 import * as React from "react";
+import { useRouter } from "next/navigation";
 
 type Props = {
-  id: string;                  // submission.id
-  initialStatus: string;       // submission.status
-  onSaved?: (updated: any) => void; // optioneel: rij in parent verversen
+  id: string;            // submission.id
+  initialStatus: string; // submission.status
 };
 
 const OPTIONS = ["RECEIVED","GRADING","ADJUSTED","APPROVED","REJECTED","PAID"];
 
-export default function StatusEditor({ id, initialStatus, onSaved }: Props) {
+export default function StatusEditor({ id, initialStatus }: Props) {
+  const router = useRouter();
   const [status, setStatus] = React.useState(initialStatus || "RECEIVED");
   const [message, setMessage] = React.useState("");
   const [saving, setSaving] = React.useState(false);
@@ -24,7 +25,10 @@ export default function StatusEditor({ id, initialStatus, onSaved }: Props) {
       });
       const data = await res.json();
       if (!res.ok || !data?.ok) throw new Error(data?.error || "Opslaan mislukt");
-      onSaved?.(data.submission);
+
+      // ✅ pagina opnieuw renderen zodat status/header direct updaten
+      router.refresh();
+      setMessage("");
     } catch (e: any) {
       alert(e.message);
     } finally {

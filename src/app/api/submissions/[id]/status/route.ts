@@ -15,6 +15,13 @@ function appendEvent(metaText: string | null | undefined, evt: any): string {
   return JSON.stringify(arr);
 }
 
+// ✅ JSON helper: BigInt -> Number
+function jsonSafe<T>(obj: T): T {
+  return JSON.parse(
+    JSON.stringify(obj, (_k, v) => (typeof v === "bigint" ? Number(v) : v))
+  );
+}
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -48,6 +55,7 @@ export async function PATCH(
       include: { items: true },
     });
 
+    // klantmail (best-effort)
     (async () => {
       try {
         if (!updated.email) return;
@@ -78,10 +86,13 @@ export async function PATCH(
           html: bodyMap[status] ?? `<p>Status: <strong>${status}</strong></p>`,
           replyTo: process.env.MAIL_ADMIN,
         });
-      } catch (e) { console.warn("[status] customer mail failed:", e); }
+      } catch (e) {
+        console.warn("[status] customer mail failed:", e);
+      }
     })();
 
-    return NextResponse.json({ ok: true, submission: updated });
+    // ⬅️ BigInt-vrije JSON teruggeven
+    return NextResponse.json(jsonSafe({ ok: true, submission: updated }));
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "error" }, { status: 500 });
   }
