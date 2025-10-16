@@ -15,12 +15,9 @@ export default function BuylistPage({
   payoutPct,
   condMap,
 }: {
-  payoutPct: number; // bv. 0.70 – via server wrapper page.tsx
+  payoutPct: number; // bv. 0.70 – komt uit server wrapper page.tsx
   condMap: CondMap;  // { NMEX: 1.0, GDLP: 0.9 }
 }) {
-
-
-export default function BuylistPage() {
   // state
   const [items, setItems] = useState<CartItem[]>([]);
   const [email, setEmail] = useState("");
@@ -29,64 +26,51 @@ export default function BuylistPage() {
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
-  setItems((prev) => {
-  const idx = prev.findIndex((p) => p.idProduct === id && p.isFoil === form.isFoil);
-  if (idx !== -1) {
-    const next = [...prev];
-    next[idx] = { ...next[idx], qty: Number(next[idx].qty || 1) + qty };
-    return next;
-  }
-  // default conditie = NMEX
-  return [...prev, { idProduct: id, isFoil: form.isFoil, qty, cond: "NMEX" }];
-});
+  // add-item form
+  const [form, setForm] = useState<{ idProduct: string; isFoil: boolean; qty: number }>({
+    idProduct: "",
+    isFoil: false,
+    qty: 1,
+  });
 
-
-  /** ───────────────────────────────────────────────────────────
-   * Build lookup map from quotes for quick access
-   * ───────────────────────────────────────────────────────────*/
+  /** Build lookup map from quotes */
   const byKey = useMemo(() => {
     const m = new Map<string, QuoteLine>();
     for (const q of quotes ?? []) m.set(`${q.idProduct}-${q.isFoil ? 1 : 0}`, q);
     return m;
   }, [quotes]);
 
-  /** ───────────────────────────────────────────────────────────
-   * Derive "rows" by MERGING duplicates in local cart state.
-   * Key = idProduct + isFoil. Qty wordt bij elkaar opgeteld.
-   * ───────────────────────────────────────────────────────────*/
-const rows = useMemo(() => {
-  const merged = new Map<string, CartItem>();
-  for (const it of items) {
-    const key = `${it.idProduct}-${it.isFoil ? 1 : 0}`;
-    const cur = merged.get(key);
-    if (cur) cur.qty += it.qty;
-    else merged.set(key, { ...it, cond: it.cond ?? "NMEX" });
-  }
-  return Array.from(merged.values()).map((it) => {
-    const key = `${it.idProduct}-${it.isFoil ? 1 : 0}`;
-    const q = byKey.get(key);
-    const serverUnit = q?.unit ?? 0;           // trend (EUR) uit server
-    const cond = it.cond ?? "NMEX";
-    const condMult = condMap[cond] ?? 1.0;     // NMEX=1.0, GDLP=0.9
-    const paidUnit = round2(serverUnit * payoutPct * condMult);
-    const lineTotal = round2(paidUnit * it.qty);
-    return {
-      ...it,
-      cond,
-      serverUnit,       // trend unit (EUR)
-      unit: paidUnit,   // wat we betalen per unit
-      lineTotal,
-      available: q?.available ?? false,
-    };
-  });
-}, [items, byKey, payoutPct, condMap]);
-
+  /** Merge duplicates → rows */
+  const rows = useMemo(() => {
+    const merged = new Map<string, CartItem>();
+    for (const it of items) {
+      const key = `${it.idProduct}-${it.isFoil ? 1 : 0}`;
+      const cur = merged.get(key);
+      if (cur) cur.qty += it.qty;
+      else merged.set(key, { ...it, cond: it.cond ?? "NMEX" });
+    }
+    return Array.from(merged.values()).map((it) => {
+      const key = `${it.idProduct}-${it.isFoil ? 1 : 0}`;
+      const q = byKey.get(key);
+      const serverUnit = q?.unit ?? 0;            // trend (EUR) van server, geen korting
+      const cond = it.cond ?? "NMEX";
+      const condMult = condMap[cond] ?? 1.0;      // NMEX=1.0, GDLP=0.9
+      const paidUnit = round2(serverUnit * payoutPct * condMult);
+      const lineTotal = round2(paidUnit * it.qty);
+      return {
+        ...it,
+        cond,
+        serverUnit,        // trend unit (EUR)
+        unit: paidUnit,    // uitbetaald per unit
+        lineTotal,
+        available: q?.available ?? false,
+      };
+    });
+  }, [items, byKey, payoutPct, condMap]);
 
   const total = useMemo(() => round2(rows.reduce((s, r) => s + r.lineTotal, 0)), [rows]);
 
-  /** ───────────────────────────────────────────────────────────
-   * Actions
-   * ───────────────────────────────────────────────────────────*/
+  /** Actions */
   function addItem() {
     const id = Number(form.idProduct);
     const qty = Math.max(1, Number(form.qty) || 1);
@@ -103,24 +87,15 @@ const rows = useMemo(() => {
         next[idx] = { ...next[idx], qty: Number(next[idx].qty || 1) + qty };
         return next;
       }
-      return [...prev, { idProduct: id, isFoil: form.isFoil, qty }];
+      return [...prev, { idProduct: id, isFoil: form.isFoil, qty, cond: "NMEX" }];
     });
 
     setForm((f) => ({ ...f, idProduct: "", qty: 1 }));
     setMsg(null);
   }
 
-  function updateCond(idProduct: number, isFoil: boolean, cond: CondKey) {
-  setItems((prev) =>
-    prev.map((p) =>
-      p.idProduct === idProduct && p.isFoil === isFoil ? { ...p, cond } : p
-    )
-  );
-}
-
   function updateQty(idProduct: number, isFoil: boolean, qty: number) {
     const q = Math.max(1, Number(qty) || 1);
-    // pas alle entries met dezelfde sleutel aan (zeker bij oude dupes)
     setItems((prev) =>
       prev.map((p) =>
         p.idProduct === idProduct && p.isFoil === isFoil ? { ...p, qty: q } : p
@@ -128,8 +103,15 @@ const rows = useMemo(() => {
     );
   }
 
+  function updateCond(idProduct: number, isFoil: boolean, cond: CondKey) {
+    setItems((prev) =>
+      prev.map((p) =>
+        p.idProduct === idProduct && p.isFoil === isFoil ? { ...p, cond } : p
+      )
+    );
+  }
+
   function removeItem(idProduct: number, isFoil: boolean) {
-    // verwijder ALLE entries voor die sleutel (id+foil)
     setItems((prev) => prev.filter((p) => !(p.idProduct === idProduct && p.isFoil === isFoil)));
   }
 
@@ -141,15 +123,14 @@ const rows = useMemo(() => {
     setLoading(true);
     setMsg(null);
     try {
-      // Stuur de GEMERGEDE rows naar de quote API
+      // Stuur GEMERGEDE rows naar quote-API (zonder pct!)
       const res = await fetch(`/api/prices/quote`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    items: rows.map((r) => ({ idProduct: r.idProduct, isFoil: r.isFoil, qty: r.qty })),
-  }),
-});
-
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: rows.map((r) => ({ idProduct: r.idProduct, isFoil: r.isFoil, qty: r.qty })),
+        }),
+      });
       const data = await res.json();
       if (!res.ok || !data?.ok) throw new Error(data?.error || "Quote mislukt");
       setQuotes(data.quotes as QuoteLine[]);
@@ -172,21 +153,19 @@ const rows = useMemo(() => {
     setSubmitting(true);
     setMsg(null);
     try {
-      // Verstuur de GEMERGEDE rows + clientTotal
       const res = await fetch("/api/cart/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-  email,
-  items: rows.map((r) => ({
-    idProduct: r.idProduct,
-    isFoil: r.isFoil,
-    qty: r.qty,
-    cond: r.cond ?? "NMEX",
-  })),
-  meta: { payoutPct, clientTotal: total },
-}),
-
+          email,
+          items: rows.map((r) => ({
+            idProduct: r.idProduct,
+            isFoil: r.isFoil,
+            qty: r.qty,
+            cond: r.cond ?? "NMEX",
+          })),
+          meta: { payoutPct, clientTotal: total }, // snapshot voor admin
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data?.ok) throw new Error(data?.error || "Insturen mislukt");
@@ -268,19 +247,17 @@ const rows = useMemo(() => {
         <section className="grid gap-3 rounded-2xl border p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold">Mandje</h2>
-            <div className="flex items-center gap-3">
-              
-            
-              <span className="w-10 text-right text-sm tabular-nums">{percent}%</span>
-              <button
-                onClick={fetchQuotes}
-                className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50"
-                disabled={loading || rows.length === 0}
-                aria-busy={loading}
-              >
-                {loading ? "Quoten…" : "Vraag quotes"}
-              </button>
+            <div className="text-sm opacity-70">
+              Uitbetaal-%: <strong>{Math.round(payoutPct * 100)}%</strong>
             </div>
+            <button
+              onClick={fetchQuotes}
+              className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50"
+              disabled={loading || rows.length === 0}
+              aria-busy={loading}
+            >
+              {loading ? "Quoten…" : "Vraag quotes"}
+            </button>
           </div>
 
           <div className="overflow-x-auto">
@@ -289,7 +266,7 @@ const rows = useMemo(() => {
                 <tr className="border-b bg-gray-50">
                   <th className="px-2 py-2 text-left">idProduct</th>
                   <th className="px-2 py-2 text-left">Foil</th>
-                  <th className="px-2 py-2 text-left">Conditie</th> {/* nieuw */}
+                  <th className="px-2 py-2 text-left">Conditie</th>
                   <th className="px-2 py-2 text-right">Qty</th>
                   <th className="px-2 py-2 text-right">Unit (server)</th>
                   <th className="px-2 py-2 text-right">Unit × %</th>
@@ -300,7 +277,7 @@ const rows = useMemo(() => {
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center opacity-60">
+                    <td colSpan={8} className="py-8 text-center opacity-60">
                       Nog geen items.
                     </td>
                   </tr>
@@ -310,16 +287,15 @@ const rows = useMemo(() => {
                       <td className="px-2 py-2">{r.idProduct}</td>
                       <td className="px-2 py-2">{r.isFoil ? "Yes" : "No"}</td>
                       <td className="px-2 py-2">
-  <select
-    className="border rounded px-2 py-1 text-sm"
-    value={r.cond ?? "NMEX"}
-    onChange={(e) => updateCond(r.idProduct, r.isFoil, e.target.value as CondKey)}
-  >
-    <option value="NMEX">NM/EX</option>
-    <option value="GDLP">GD/LP (-10%)</option>
-  </select>
-</td>
-
+                        <select
+                          className="border rounded px-2 py-1 text-sm"
+                          value={r.cond ?? "NMEX"}
+                          onChange={(e) => updateCond(r.idProduct, r.isFoil, e.target.value as CondKey)}
+                        >
+                          <option value="NMEX">NM/EX</option>
+                          <option value="GDLP">GD/LP (-10%)</option>
+                        </select>
+                      </td>
                       <td className="px-2 py-2 text-right">
                         <input
                           type="number"
@@ -350,7 +326,7 @@ const rows = useMemo(() => {
               </tbody>
               <tfoot>
                 <tr>
-                  <td colSpan={5} />
+                  <td colSpan={6} />
                   <td className="px-2 py-3 text-right text-lg font-semibold tabular-nums">
                     € {total.toFixed(2)}
                   </td>
@@ -401,7 +377,7 @@ const rows = useMemo(() => {
                         next[idx] = { ...next[idx], qty: Number(next[idx].qty || 1) + 1 };
                         return next;
                       }
-                      return [...prev, { idProduct: s.idProduct, isFoil: s.isFoil, qty: 1 }];
+                      return [...prev, { idProduct: s.idProduct, isFoil: s.isFoil, qty: 1, cond: "NMEX" }];
                     })
                   }
                 >
