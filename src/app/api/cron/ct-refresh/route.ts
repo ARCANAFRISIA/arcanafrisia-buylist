@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
 
       const stats = await processIds(ids);
       return NextResponse.json({
-        ok: 200, mode: "window", window: { limit, offset },
+        status: 200, mode: "window", window: { limit, offset },
         ...stats, durationMs: Date.now() - t0
       });
     }
@@ -100,7 +100,7 @@ export async function GET(req: NextRequest) {
       // wrap around to start when reaching the end
       await prisma.cTRefreshCursor.update({ where: { id: 1 }, data: { offset: 0 }});
       return NextResponse.json({
-        ok: 200, mode: "cursor",
+        status: 200, mode: "cursor",
         note: "Reached end of mapping — wrapped to 0. Nothing processed in this run.",
         totalBlueprints: total, processed: 0, ok: 0, fail: 0,
         durationMs: Date.now() - t0
@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
     await prisma.cTRefreshCursor.update({ where: { id: 1 }, data: { offset: nextOffset, pageSize }});
 
     return NextResponse.json({
-      ok: 200, mode: "cursor",
+      status: 200, mode: "cursor",
       window: { offset, pageSize, nextOffset, totalBlueprints: total },
       ...stats, durationMs: Date.now() - t0
     });
