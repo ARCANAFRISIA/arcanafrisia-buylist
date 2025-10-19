@@ -106,6 +106,11 @@ async function isZeroSeller(username: string): Promise<boolean> {
   sellerZeroCache.set(username, isZero);
   return isZero;
 }
+// TEMP: stub voor probe-mode; vervang later door echte check of import.
+// Hiermee compileert en runt alles, en 'probe' valt effectief terug op "allowed".
+async function isListingZeroEligible(_id: number): Promise<boolean> {
+  return true;
+}
 
 export async function normalizeCTZeroOffers(
   offers: CTOffer[],
@@ -125,18 +130,20 @@ export async function normalizeCTZeroOffers(
     (a.price_cents ?? a?.price?.cents ?? 0) - (b.price_cents ?? b?.price?.cents ?? 0)
   );
 
-  // optioneel: cart-probe voor goedkoopste N
+    // optioneel: vendor-probe voor goedkoopste N (geen cart call, alleen seller zero-check)
   const probeResult = new Map<number, boolean>();
   if (zeroOnly && zeroMode === "probe") {
     let tested = 0;
     for (const o of sorted) {
       const id = o.id;
       if (!id || tested >= probeLimit) break;
-      const ok = await isListingZeroEligible(id as number); // uit ct-zero-check.ts (optioneel)
+      const sellerName = o.user?.username?.trim() || "";
+      const ok = sellerName ? await isZeroSeller(sellerName) : false;
       probeResult.set(id, ok);
       tested++;
     }
   }
+
 
   const out: NormalizedOffer[] = [];
   for (const o of offers) {
@@ -144,20 +151,24 @@ export async function normalizeCTZeroOffers(
 
     // ----- Zero-eligibility heuristiek -----
     let isZeroLike = true; // als zeroOnly=false maakt het niet uit
-    if (zeroOnly) {
+          if (zeroOnly) {
       if (zeroMode === "probe" && probeResult.has(o.id!)) {
         isZeroLike = probeResult.get(o.id!)!;
       } else if (zeroMode === "pro") {
-        // PRO is hoofdcriterium; twee extra signalen als fallback
+        // PRO = CT Zero-achtige verkopers (zoals lokaal)
         const isPro  = seller.user_type === "pro";
         const hub    = seller.can_sell_via_hub === true;
         const sealCT = seller.can_sell_sealed_with_ct_zero === true;
-        isZeroLike   = isPro || hub || sealCT || hasZeroFlag(o);
+        // extra fallback: directe zero-signalering en seller shipping-methode
+        const zeroFlag  = hasZeroFlag(o);
+        const zeroByAPI = seller.username ? await isZeroSeller(seller.username) : false;
+        isZeroLike = isPro || hub || sealCT || zeroFlag || zeroByAPI;
       } else {
-        // zeroMode === "none": geen filtering
+        // 'none' => geen zero-filter
         isZeroLike = true;
       }
     }
+
     if (zeroOnly && !isZeroLike) continue;
 
     // ----- rest: cond/lang/foil/price -----
