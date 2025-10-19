@@ -80,3 +80,36 @@ model SubmissionItem {
   @@index([submissionId])
   @@index([productId])
 }
+model CTMarketSummary {
+  id Int @id @default(autoincrement())
+  capturedAt    DateTime  @default(now())
+  blueprintId   Int
+  cardmarketId  Int?      // handig voor join met CM
+  scryfallId    String?   // handig voor cross-check
+  bucket        String    // "NM" | "EX" | "GD"
+  isFoil        Boolean
+  currency      String    @default("EUR")
+  minPrice      Decimal?  @db.Decimal(10,2)
+  medianPrice   Decimal?  @db.Decimal(10,2)
+  offerCount    Int       @default(0)
+
+  @@index([capturedAt])
+  @@unique([blueprintId, bucket, isFoil, capturedAt])
+}
+model BlueprintMapping {
+  blueprintId     Int       @id
+  expansionId     Int
+  name            String?
+  collectorNumber String?
+  cardmarketId    Int?
+  scryfallId      String?
+  updatedAt       DateTime  @updatedAt
+
+  @@index([expansionId])
+}
+model CTRefreshCursor {
+  id        Int      @id @default(1)
+  offset    Int      @default(0)
+  pageSize  Int      @default(250)
+  updatedAt DateTime @updatedAt
+}
