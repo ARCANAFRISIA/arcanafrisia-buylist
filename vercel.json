@@ -1,0 +1,6 @@
+{
+  "crons": [
+    { "path": "/api/cron/ct-refresh?pageSize=200", "schedule": "*/1 * * * *" },
+    { "path": "/api/cron/ct-map-refresh",          "schedule": "0 4 * * 0" }
+  ]
+}
