@@ -46,11 +46,11 @@ export type CTMarketOptions = {
 
 async function j(url: string) {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 7_000); // 7s hard timeout
+  const t = setTimeout(() => ctrl.abort(), 8000); // 8s hard timeout
   try {
     const r = await fetch(url, {
       headers: { Authorization: `Bearer ${TOKEN}` },
-      signal: ctrl.signal
+      signal: ctrl.signal,
     });
     if (!r.ok) throw new Error(`${r.status} ${r.statusText} ${url}`);
     return r.json();
@@ -58,6 +58,7 @@ async function j(url: string) {
     clearTimeout(t);
   }
 }
+
 
 
 export async function getMarketplaceByBlueprint(blueprintId: number): Promise<CTOffer[]> {
@@ -162,22 +163,21 @@ export async function normalizeCTZeroOffers(
     // ----- Zero-eligibility heuristiek -----
     let isZeroLike = true; // als zeroOnly=false maakt het niet uit
           if (zeroOnly) {
-      if (zeroMode === "probe" && probeResult.has(o.id!)) {
-        isZeroLike = probeResult.get(o.id!)!;
-      } else if (zeroMode === "pro") {
-        // PRO = CT Zero-achtige verkopers (zoals lokaal)
-        const isPro  = seller.user_type === "pro";
-        const hub    = seller.can_sell_via_hub === true;
-        const sealCT = seller.can_sell_sealed_with_ct_zero === true;
-        // extra fallback: directe zero-signalering en seller shipping-methode
-        const zeroFlag  = hasZeroFlag(o);
-        const zeroByAPI = seller.username ? await isZeroSeller(seller.username) : false;
-        isZeroLike = isPro || hub || sealCT || zeroFlag || zeroByAPI;
-      } else {
-        // 'none' => geen zero-filter
-        isZeroLike = true;
-      }
-    }
+  if (zeroMode === "probe" && probeResult.has(o.id!)) {
+    // PROBE: we hebben seller via isZeroSeller() gecheckt in het "probe" blok
+    isZeroLike = probeResult.get(o.id!)!;
+  } else if (zeroMode === "pro") {
+    // PRO: SNEL! GEEN extra API-calls per offer
+    const isPro  = seller.user_type === "pro";
+    const hub    = seller.can_sell_via_hub === true;
+    const sealCT = seller.can_sell_sealed_with_ct_zero === true;
+    const zeroFlag = hasZeroFlag(o); // alleen lokale flags, geen fetch
+    isZeroLike = isPro || hub || sealCT || zeroFlag;
+  } else {
+    // "none": geen filter
+    isZeroLike = true;
+  }
+}
 
     if (zeroOnly && !isZeroLike) continue;
 
