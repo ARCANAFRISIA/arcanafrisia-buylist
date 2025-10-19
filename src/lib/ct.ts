@@ -10,7 +10,13 @@ export type CTOffer = {
   price?: { cents?: number; currency?: string };
   properties_hash?: Record<string, any>;
   properties?: Record<string, any>;
-  user?: { username?: string; cardtrader_zero?: boolean; zero?: boolean };
+  user?: {
+    username?: string;
+    cardtrader_zero?: boolean;
+    zero?: boolean;
+    // (runtime: we lezen hier soms extra velden uit; typ niet te strikt)
+    [k: string]: any;
+  };
   cardtrader_zero?: boolean;
   zero?: boolean;
   language?: string;
@@ -24,6 +30,18 @@ export type NormalizedOffer = {
   lang: "en";
   foil: boolean;
   seller?: string;
+};
+
+// === NIEUW: options-type dat ook door /providers/ct/summary gebruikt kan worden ===
+export type CTMarketOptions = {
+  zeroOnly?: boolean;                           // default: true
+  zeroMode?: "pro" | "probe" | "none";          // default: "pro"
+  zeroProbeLimit?: number;                      // default: 8
+
+  // Filters vanuit je API-route:
+  allowedConds?: Array<"NM" | "EX" | "GD">;     // default: ["NM","EX","GD"]
+  lang?: "en" | null;                           // default: null (geen filter)
+  foil?: boolean | null;                        // default: null (geen filter)
 };
 
 async function j(url: string) {
@@ -89,14 +107,18 @@ async function isZeroSeller(username: string): Promise<boolean> {
   return isZero;
 }
 
-
 export async function normalizeCTZeroOffers(
   offers: CTOffer[],
-  opts: { zeroOnly?: boolean; zeroMode?: "pro" | "probe" | "none"; zeroProbeLimit?: number } = {}
+  opts: CTMarketOptions = {}
 ): Promise<NormalizedOffer[]> {
-  const zeroOnly   = opts.zeroOnly !== false;           // default: true
-  const zeroMode   = opts.zeroMode ?? "pro";            // default: PRO-filter
-  const probeLimit = opts.zeroProbeLimit ?? 8;
+  const zeroOnly     = opts.zeroOnly !== false;              // default: true
+  const zeroMode     = opts.zeroMode ?? "pro";               // default: PRO-filter
+  const probeLimit   = opts.zeroProbeLimit ?? 8;
+  const allowedConds = (opts.allowedConds?.length
+    ? opts.allowedConds
+    : (["NM", "EX", "GD"] as Array<"NM" | "EX" | "GD">));
+  const langFilter   = opts.lang ?? null;                    // null = geen filter
+  const foilFilter   = (typeof opts.foil === "boolean" ? opts.foil : null); // null = geen filter
 
   // sorteer goedkoop→duur (handig voor probe)
   const sorted = offers.slice().sort((a, b) =>
@@ -110,7 +132,7 @@ export async function normalizeCTZeroOffers(
     for (const o of sorted) {
       const id = o.id;
       if (!id || tested >= probeLimit) break;
-      const ok = await isListingZeroEligible(id); // uit ct-zero-check.ts (optioneel)
+      const ok = await isListingZeroEligible(id as number); // uit ct-zero-check.ts (optioneel)
       probeResult.set(id, ok);
       tested++;
     }
@@ -118,8 +140,7 @@ export async function normalizeCTZeroOffers(
 
   const out: NormalizedOffer[] = [];
   for (const o of offers) {
-    const seller = o.user ?? {};
-    const sellerName = seller.username?.trim();
+    const seller = (o.user ?? {}) as any;
 
     // ----- Zero-eligibility heuristiek -----
     let isZeroLike = true; // als zeroOnly=false maakt het niet uit
@@ -131,7 +152,7 @@ export async function normalizeCTZeroOffers(
         const isPro  = seller.user_type === "pro";
         const hub    = seller.can_sell_via_hub === true;
         const sealCT = seller.can_sell_sealed_with_ct_zero === true;
-        isZeroLike   = isPro || hub || sealCT;
+        isZeroLike   = isPro || hub || sealCT || hasZeroFlag(o);
       } else {
         // zeroMode === "none": geen filtering
         isZeroLike = true;
@@ -145,14 +166,21 @@ export async function normalizeCTZeroOffers(
     if (!cond) continue;
 
     const lang  = normLang(props.mtg_language ?? props.language ?? o.language ?? "en");
-    if (lang !== "en") continue;
+    if (!lang) continue;
 
     const foil  = Boolean(props.mtg_foil ?? props.foil ?? o.foil);
     const price = pickPrice(o);
     if (!price || price <= 0) continue;
 
-    out.push({ price, cond, lang: "en", foil, seller: sellerName });
+    // === NIEUW: filters toepassen ===
+    if (!allowedConds.includes(cond)) continue;
+    if (langFilter && lang !== langFilter) continue;
+    if (foilFilter !== null && foil !== foilFilter) continue;
+
+    out.push({ price, cond, lang: "en", foil, seller: seller.username?.trim() });
   }
   return out;
 }
 
+// NB: verwacht helper bestaat elders. Als niet, stub tijdelijk:
+// async function isListingZeroEligible(id: number): Promise<boolean> { return true; }
