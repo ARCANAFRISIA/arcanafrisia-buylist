@@ -45,10 +45,20 @@ export type CTMarketOptions = {
 };
 
 async function j(url: string) {
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${TOKEN}` } });
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText} ${url}`);
-  return r.json();
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 7_000); // 7s hard timeout
+  try {
+    const r = await fetch(url, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      signal: ctrl.signal
+    });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText} ${url}`);
+    return r.json();
+  } finally {
+    clearTimeout(t);
+  }
 }
+
 
 export async function getMarketplaceByBlueprint(blueprintId: number): Promise<CTOffer[]> {
   const data: any = await j(`${HOST}/api/v2/marketplace/products?blueprint_id=${blueprintId}`);
