@@ -5,15 +5,18 @@ import { summarizeByBucket } from "@/lib/ctStats";
 
 export const dynamic = "force-dynamic";
 
+type Cond = "NM" | "EX" | "GD";
+const isCond = (x: string): x is Cond => x === "NM" || x === "EX" || x === "GD";
+
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
 
   const bp = Number(sp.get("blueprintId") || 0);
   if (!bp) return NextResponse.json({ error: "blueprintId required" }, { status: 400 });
 
-  // Optionele metadata
-  const cm = sp.get("cardmarketId");
-  const sf = sp.get("scryfallId");
+  // Optionele metadata (nu ongebruikt → underscore voorkomt lint errors)
+  const _cm = sp.get("cardmarketId");
+  const _sf = sp.get("scryfallId");
 
   // ---- UI-achtige filters uit de query ----
   // zero: pro | probe | 0/none
@@ -23,14 +26,17 @@ export async function GET(req: NextRequest) {
     zeroParam === "probe" ? "probe" :
     zeroParam === "0" || zeroParam === "none" ? "none" : "pro";
 
-  // cond: bv. "NM,EX" (default alle: NM/EX/GD)
+  // cond: bv. "NM,EX" (default alle: NM/EX/GD)  → altijd Array<'NM'|'EX'|'GD'>
   const condParam = (sp.get("cond") || "").toUpperCase().trim();
-  const conds = condParam
-    ? new Set(condParam.split(",").map(s => s.trim()).filter(Boolean))
-    : new Set<"NM"|"EX"|"GD">(["NM","EX","GD"]);
+  const allowedConds: Cond[] = condParam
+    ? Array.from(new Set(
+        condParam.split(",").map(s => s.trim()).filter(Boolean)
+      )).filter(isCond)
+    : (["NM", "EX", "GD"] as Cond[]);
 
-  // lang: default EN
-  const lang = (sp.get("lang") || "en").toLowerCase();
+  // lang: default EN (type sluit aan op CTMarketOptions)
+  const langParam = (sp.get("lang") || "en").toLowerCase();
+  const lang: "en" | null = langParam === "en" ? "en" : null;
 
   // foil: 1 = alleen foil, 0 = alleen non-foil, leeg = beide
   const foilStr = sp.get("foil");
@@ -54,7 +60,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       blueprintId: bp,
       countOffers: offers.length,
-      filters: { zeroOnly, zeroMode, conds: [...conds], lang, foil },
+      filters: { zeroOnly, zeroMode, conds: allowedConds, lang, foil },
       sample
     });
   }
@@ -64,9 +70,9 @@ export async function GET(req: NextRequest) {
     zeroOnly,
     zeroMode,
     zeroProbeLimit: 8,
-    allowedConds: conds,
-    lang,
-    foil
+    allowedConds,   // ✅ Array<'NM'|'EX'|'GD'>
+    lang,           // ✅ 'en' | null
+    foil            // ✅ boolean | null
   });
 
   // samenvatten in buckets (foil/non-foil)
@@ -75,10 +81,10 @@ export async function GET(req: NextRequest) {
   const now = new Date();
 
   // fetch mapping once for this blueprint
-const map = await prisma.blueprintMapping.findUnique({
-  where: { blueprintId: bp },
-  select: { cardmarketId: true, scryfallId: true },
-});
+  const map = await prisma.blueprintMapping.findUnique({
+    where: { blueprintId: bp },
+    select: { cardmarketId: true, scryfallId: true },
+  });
 
   // optioneel: opslag
   const writes = [...rowsNF, ...rowsFoil].map(r =>
@@ -110,4 +116,3 @@ const map = await prisma.blueprintMapping.findUnique({
     summary: { nonFoil: rowsNF, foil: rowsFoil }
   });
 }
-
