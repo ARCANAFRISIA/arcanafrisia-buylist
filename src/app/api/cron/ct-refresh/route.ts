@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
         }
       }
     }
-  }
+
 // build latest payload
 const latestData = [...rowsNF, ...rowsFoil].map(r => ({
   blueprintId: bp,
@@ -104,8 +104,8 @@ for (const d of latestData) {
     },
     create: d,
   });
+ }
 }
-
 
   // ====== MODE A: Window (test) ======
   if (sp.get("limit")) {
