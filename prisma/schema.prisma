@@ -85,7 +85,7 @@ model BlueprintMapping {
   collectorNumber String?
   cardmarketId    Int?
   scryfallId      String?
-  updatedAt       DateTime
+  updatedAt       DateTime @updatedAt     
   foil            Boolean?
   setCode         String?
 
