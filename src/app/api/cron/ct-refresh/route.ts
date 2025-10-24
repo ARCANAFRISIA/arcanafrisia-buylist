@@ -75,6 +75,36 @@ export async function GET(req: NextRequest) {
       }
     }
   }
+// build latest payload
+const latestData = [...rowsNF, ...rowsFoil].map(r => ({
+  blueprintId: bp,
+  bucket: r.bucket,
+  isFoil: r.isFoil,
+  capturedAt: now,
+  minPrice: r.min ?? null,
+  medianPrice: r.med ?? null,
+  offerCount: r.count,
+  cardmarketId: map?.cardmarketId ?? null,
+  scryfallId:   map?.scryfallId   ?? null,
+}));
+
+// upsert per key naar CTMarketLatest
+for (const d of latestData) {
+  await prisma.cTMarketLatest.upsert({
+    where: { blueprintId_bucket_isFoil: {
+      blueprintId: d.blueprintId, bucket: d.bucket, isFoil: d.isFoil
+    }},
+    update: {
+      capturedAt: d.capturedAt,
+      minPrice: d.minPrice,
+      medianPrice: d.medianPrice,
+      offerCount: d.offerCount,
+      cardmarketId: d.cardmarketId,
+      scryfallId:   d.scryfallId,
+    },
+    create: d,
+  });
+}
 
 
   // ====== MODE A: Window (test) ======
