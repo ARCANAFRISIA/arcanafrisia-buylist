@@ -47,3 +47,5 @@ next-env.d.ts
 /prisma/*.db-journal
 *.sqlite
 *.sqlite-journal
+
+data/scryfall-default-cards.json
