@@ -1,9 +1,7 @@
-// ---------- Prisma Client ----------
 generator client {
   provider = "prisma-client-js"
 }
 
-// ---------- Datasource ----------
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -16,100 +14,102 @@ model Product {
   lang      String    @default("EN")
   isFoil    Boolean   @default(false)
   scarcity  String?
-  cmTrend   Decimal? // <-- no @db.Decimal
+  cmTrend   Decimal?
   cmTrendAt DateTime?
 }
 
 model PriceGuide {
   id        String   @id @default(cuid())
-  productId Int
+  productId Int      @unique
   trend     Decimal?
   trendFoil Decimal?
   source    String?  @default("Cardmarket")
   isCurrent Boolean  @default(true)
   createdAt DateTime @default(now())
-
-  @@unique([productId])
 }
 
 model Submission {
-  id     String  @id @default(cuid())
-  email  String?
-  status String  @default("RECEIVED") // enum -> String i.v.m. SQLite
-
-  // totals & policy snapshot (in centen)
-  subtotalCents    Int // som van lineCents
-  serverTotalCents Int // = subtotalCents, apart gelogd
+  id               String           @id @default(cuid())
+  email            String?
+  status           String           @default("RECEIVED")
+  subtotalCents    Int
+  serverTotalCents Int
   clientTotalCents Int?
-  payoutPct        Int // 0..100
-  currency         String @default("EUR")
-  pricingSource    String @default("Cardmarket")
-
-  // Json niet ondersteund in SQLite -> tekstveld met JSON-string
-  metaText String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  items SubmissionItem[]
+  payoutPct        Int
+  currency         String           @default("EUR")
+  pricingSource    String           @default("Cardmarket")
+  metaText         String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  items            SubmissionItem[]
 }
 
 model SubmissionItem {
-  id           String @id @default(cuid())
-  submissionId String
-
-  // Cardmarket product id; we houden geen relation aan Product aan (types verschillen toch)
-  productId BigInt
-  isFoil    Boolean @default(false)
-
-  qty Int
-
-  // snapshot van trends (centen)
+  id             String     @id @default(cuid())
+  submissionId   String
+  productId      BigInt
+  isFoil         Boolean    @default(false)
+  qty            Int
   trendCents     Int?
   trendFoilCents Int?
-
-  // payout (centen)
-  unitCents Int
-  lineCents Int
-
-  // policy snapshot per regel (optioneel)
-  pct Int?
-
-  Submission Submission @relation(fields: [submissionId], references: [id])
+  unitCents      Int
+  lineCents      Int
+  pct            Int?
+  Submission     Submission @relation(fields: [submissionId], references: [id])
 
   @@index([submissionId])
   @@index([productId])
 }
-model CTMarketSummary {
-  id Int @id @default(autoincrement())
-  capturedAt    DateTime  @default(now())
-  blueprintId   Int
-  cardmarketId  Int?      // handig voor join met CM
-  scryfallId    String?   // handig voor cross-check
-  bucket        String    // "NM" | "EX" | "GD"
-  isFoil        Boolean
-  currency      String    @default("EUR")
-  minPrice      Decimal?  @db.Decimal(10,2)
-  medianPrice   Decimal?  @db.Decimal(10,2)
-  offerCount    Int       @default(0)
 
-  @@index([capturedAt])
+model CTMarketSummary {
+  id           Int      @id @default(autoincrement())
+  capturedAt   DateTime @default(now())
+  blueprintId  Int
+  cardmarketId Int?
+  scryfallId   String?
+  bucket       String
+  isFoil       Boolean
+  currency     String   @default("EUR")
+  minPrice     Decimal? @db.Decimal(10, 2)
+  medianPrice  Decimal? @db.Decimal(10, 2)
+  offerCount   Int      @default(0)
+
   @@unique([blueprintId, bucket, isFoil, capturedAt])
+  @@index([capturedAt])
 }
+
 model BlueprintMapping {
-  blueprintId     Int       @id
+  blueprintId     Int      @id
   expansionId     Int
   name            String?
   collectorNumber String?
   cardmarketId    Int?
   scryfallId      String?
-  updatedAt       DateTime  @updatedAt
+  updatedAt       DateTime
+  foil            Boolean?
+  setCode         String?
 
+  @@index([setCode, foil])
   @@index([expansionId])
 }
+
 model CTRefreshCursor {
   id        Int      @id @default(1)
   offset    Int      @default(0)
   pageSize  Int      @default(250)
   updatedAt DateTime @updatedAt
+}
+
+model ScryfallCard {
+  id              String    @id
+  name            String
+  set             String
+  collectorNumber String
+  finishes        String[]
+  imageSmall      String?
+  imageNormal     String?
+  releasedAt      DateTime? @db.Timestamp(6)
+  cardmarketId    Int?
+
+  @@index([name, set, collectorNumber])
 }
