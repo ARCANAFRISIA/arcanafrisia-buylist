@@ -68,8 +68,8 @@ await prisma.cTMarketSummary.createMany({
   data,
   skipDuplicates: true,   // dupes = stil overslaan
 });
+    }
   }
-}
 
 
   // ====== MODE A: Window (test) ======
