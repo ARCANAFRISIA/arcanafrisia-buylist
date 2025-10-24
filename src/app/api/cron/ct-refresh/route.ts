@@ -52,22 +52,27 @@ export async function GET(req: NextRequest) {
     });
 
     // 5) Writes (voorkom duplicate key errors)
-    const data = [...rowsNF, ...rowsFoil].map(r => ({
-  capturedAt: now,
-  blueprintId: bp,
-  cardmarketId: map?.cardmarketId ?? null,
-  scryfallId:   map?.scryfallId   ?? null,
-  bucket: r.bucket,
-  isFoil: r.isFoil,
-  minPrice: r.min ?? null,
-  medianPrice: r.med ?? null,
-  offerCount: r.count,
-}));
-
-await prisma.cTMarketSummary.createMany({
-  data,
-  skipDuplicates: true,   // dupes = stil overslaan
-});
+    for (const r of [...rowsNF, ...rowsFoil]) {
+      try {
+        await prisma.cTMarketSummary.create({
+          data: {
+            capturedAt: now,
+            blueprintId: bp,
+            cardmarketId: map?.cardmarketId ?? null,
+            scryfallId:   map?.scryfallId   ?? null,
+            bucket: r.bucket,
+            isFoil: r.isFoil,
+            minPrice: r.min ?? null,
+            medianPrice: r.med ?? null,
+            offerCount: r.count,
+          },
+        });
+      } catch (e: any) {
+        // Prisma errorcode P2002 = duplicate unique key (we slaan die gewoon over)
+        if (e.code !== "P2002") {
+          console.error("❌ Prisma write error @bp", bp, e.message);
+        }
+      }
     }
   }
 
