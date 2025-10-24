@@ -63,6 +63,7 @@ export async function GET(_req: NextRequest) {
     collectorNumber: b.collector_number ?? null,
     cardmarketId: cmId,                 // ← hier
     scryfallId: b.scryfall_id ?? null,
+    updatedAt: new Date(),      
   },
   create: {
     blueprintId: Number(b.id),
@@ -71,6 +72,7 @@ export async function GET(_req: NextRequest) {
     collectorNumber: b.collector_number ?? null,
     cardmarketId: cmId,                 // ← en hier
     scryfallId: b.scryfall_id ?? null,
+    updatedAt: new Date(), 
   },
 });
 
