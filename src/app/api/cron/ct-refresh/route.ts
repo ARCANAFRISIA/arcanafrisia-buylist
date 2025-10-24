@@ -30,14 +30,14 @@ export async function GET(req: NextRequest) {
     // 1) CT marketplace fetchen
     const offers = await getMarketplaceByBlueprint(bp);
 
-    // 2) Normaliseren & filteren zoals de summary-route
+    // 2) Normaliseren & filteren
     const norm = await normalizeCTZeroOffers(offers, {
       zeroOnly: true,
-      zeroMode,
+      zeroMode: "pro",
       zeroProbeLimit: 8,
-      allowedConds,
-      lang,
-      foil
+      allowedConds: ["NM", "EX", "GD"],
+      lang: "en",
+      foil: null,
     });
 
     // 3) Buckets
@@ -51,30 +51,31 @@ export async function GET(req: NextRequest) {
       select: { cardmarketId: true, scryfallId: true },
     });
 
-    // 5) Upserts
-    const writes = [...rowsNF, ...rowsFoil].map(r =>
-      prisma.cTMarketSummary.upsert({
-        where: {
-          blueprintId_bucket_isFoil_capturedAt: {
-            blueprintId: bp, bucket: r.bucket, isFoil: r.isFoil, capturedAt: now
-          }
-        },
-        update: {},
-        create: {
-          capturedAt: now,
-          blueprintId: bp,
-          cardmarketId: map?.cardmarketId ?? null,
-          scryfallId:   map?.scryfallId   ?? null,
-          bucket: r.bucket,
-          isFoil: r.isFoil,
-          minPrice: r.min ?? null,
-          medianPrice: r.med ?? null,
-          offerCount: r.count,
+    // 5) Writes (voorkom duplicate key errors)
+    for (const r of [...rowsNF, ...rowsFoil]) {
+      try {
+        await prisma.cTMarketSummary.create({
+          data: {
+            capturedAt: now,
+            blueprintId: bp,
+            cardmarketId: map?.cardmarketId ?? null,
+            scryfallId:   map?.scryfallId   ?? null,
+            bucket: r.bucket,
+            isFoil: r.isFoil,
+            minPrice: r.min ?? null,
+            medianPrice: r.med ?? null,
+            offerCount: r.count,
+          },
+        });
+      } catch (e: any) {
+        // Prisma errorcode P2002 = duplicate unique key (we slaan die gewoon over)
+        if (e.code !== "P2002") {
+          console.error("❌ Prisma write error @bp", bp, e.message);
         }
-      })
-    );
-    await Promise.all(writes);
+      }
+    }
   }
+
 
   // ====== MODE A: Window (test) ======
   if (sp.get("limit")) {
