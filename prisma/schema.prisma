@@ -75,7 +75,22 @@ model CTMarketSummary {
   offerCount   Int      @default(0)
 
   @@unique([blueprintId, bucket, isFoil, capturedAt])
-  @@index([capturedAt])
+  @@index([capturedAt], name: "idx_ctsummary_captured")
+  @@index([blueprintId, isFoil, bucket, capturedAt], name: "idx_ctsummary_key_captured")
+}
+
+model CTMarketLatest {
+  blueprintId  Int
+  bucket       String
+  isFoil       Boolean
+  capturedAt   DateTime
+  minPrice     Float?
+  medianPrice  Float?
+  offerCount   Int?
+  cardmarketId Int?     // handig om mee te nemen
+  scryfallId   String?  // idem
+
+  @@id([blueprintId, bucket, isFoil]) // een enkele “laatste” snapshot per key
 }
 
 model BlueprintMapping {
