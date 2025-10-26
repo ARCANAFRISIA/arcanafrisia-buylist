@@ -72,7 +72,7 @@ export async function GET(req: Request) {
     }
 
     // voer de upserts in 1 tx uit
-    await prisma.$transaction(ops, { timeout: 90000 });
+    await prisma.$transaction(ops);
     processed += slice.length;
 
     // markeer deze slice als done
