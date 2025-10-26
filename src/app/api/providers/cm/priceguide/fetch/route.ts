@@ -58,13 +58,14 @@ function buildOAuthHeader(method: "GET" | "POST", url: string, mode: OAuthMode, 
   const signingKey = `${enc3986(APP_SECRET)}&${enc3986(ACCESS_SECRET)}`;
   const signature = crypto.createHmac("sha1", signingKey).update(baseString).digest("base64");
 
-  const headerParams = { ...oauth, oauth_signature: signature };
-  const authCore =
-    "OAuth " +
-    Object.keys(headerParams)
-      .sort()
-      .map((k) => `${k}="${enc3986(headerParams[k])}"`)
-      .join(", ");
+  const headerParams: Record<string, string> = { ...oauth, oauth_signature: signature };
+const authCore =
+  "OAuth " +
+  Object.keys(headerParams)
+    .sort()
+    .map((k) => `${k}="${enc3986(headerParams[k as keyof typeof headerParams])}"`)
+    .join(", ");
+
 
   const authHeader = withRealm ? `${authCore}, realm="${enc3986(url)}"` : authCore;
 
