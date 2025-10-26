@@ -6,10 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "pg:import:cm": "ts-node --transpile-only scripts/pg-import-cm.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.16.1",
+    "csv-parse": "^6.1.0",
     "next": "15.5.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -27,3 +29,4 @@
     "typescript": "^5"
   }
 }
+

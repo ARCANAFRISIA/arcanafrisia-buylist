@@ -33,6 +33,15 @@ function checkBasicAuth(req: NextRequest) {
 }
 
 export function middleware(req: NextRequest) {
+  const p = req.nextUrl.pathname;
+
+  // 🔓 BYPASS CM provider endpoints (no auth)
+  if (
+    p.startsWith("/api/providers/cm/priceguide/fetch") ||
+    p.startsWith("/api/providers/cm/test")
+  ) {
+    return NextResponse.next();
+  }
   if (!needsAuth(req)) return NextResponse.next();
   if (!checkBasicAuth(req)) return unauthorized();
   const res = NextResponse.next();

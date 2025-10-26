@@ -1,3 +1,10 @@
 {
-  "crons": []
+  "crons": [
+    { "path": "/api/providers/cm/priceguide/sync", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/ct-refresh?pageSize=200", "schedule": "*/1 * * * *" },
+    { "path": "/api/cron/ct-map-refresh", "schedule": "0 4 * * 0" },
+    { "path": "/api/cron/ct-cleanup", "schedule": "0 3 * * *" },
+    { "path": "/api/providers/cm/priceguide/fetch",   "schedule": "0 6 * * *" },
+    { "path": "/api/providers/cm/priceguide/process", "schedule": "*/1 6-7 * * *" }
+  ]
 }

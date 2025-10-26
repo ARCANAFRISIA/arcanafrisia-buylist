@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
 model Product {
@@ -87,8 +88,8 @@ model CTMarketLatest {
   minPrice     Float?
   medianPrice  Float?
   offerCount   Int?
-  cardmarketId Int?     // handig om mee te nemen
-  scryfallId   String?  // idem
+  cardmarketId Int? // handig om mee te nemen
+  scryfallId   String? // idem
 
   @@id([blueprintId, bucket, isFoil]) // een enkele “laatste” snapshot per key
 }
@@ -100,7 +101,7 @@ model BlueprintMapping {
   collectorNumber String?
   cardmarketId    Int?
   scryfallId      String?
-  updatedAt       DateTime @updatedAt     
+  updatedAt       DateTime @updatedAt
   foil            Boolean?
   setCode         String?
 
@@ -127,4 +128,29 @@ model ScryfallCard {
   cardmarketId    Int?
 
   @@index([name, set, collectorNumber])
+}
+
+model CMPriceGuide {
+  cardmarketId Int @id
+
+  trend        Float?
+  foilTrend    Float?
+  lowEx        Float?
+  suggested    Float?
+  germanProLow Float?
+
+  avg1      Float?
+  avg7      Float?
+  avg30     Float?
+  foilAvg1  Float?
+  foilAvg7  Float?
+  foilAvg30 Float?
+
+  updatedAt DateTime @updatedAt
+}
+
+model CMPriceGuideQueue {
+  id        Int      @id @default(autoincrement())
+  line      String // ruwe CSV-regel
+  createdAt DateTime @default(now())
 }
