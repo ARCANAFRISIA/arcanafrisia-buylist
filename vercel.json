@@ -6,7 +6,7 @@
     { "path": "/api/cron/ct-cleanup", "schedule": "0 3 * * *" },
     { "path": "/api/providers/cm/priceguide/fetch",   "schedule": "0 6 * * *" },
     { "path": "/api/providers/cm/priceguide/process", "schedule": "*/1 6-7 * * *" },
-    { "path": "/api/cron/scryfall/enqueue", "schedule": "0 3 * * 1" },
-    { "path": "/api/cron/scryfall/process", "schedule": "*/2 3-5 * * 1" }
+    { "path": "/api/cron/scryfall/enqueue", "schedule": "0 9 * * *" },          // 1x per dag
+    { "path": "/api/cron/scryfall/process", "schedule": "*/2 9-21 * * *" }      // elke 2 min overdag
   ]
 }
