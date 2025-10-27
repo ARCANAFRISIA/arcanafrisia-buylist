@@ -154,3 +154,29 @@ model CMPriceGuideQueue {
   line      String // ruwe CSV-regel
   createdAt DateTime @default(now())
 }
+
+model ScryfallLookup {
+  cardmarketId    Int      @id
+  scryfallId      String
+  oracleId        String?
+  name            String
+  set             String
+  collectorNumber String?
+  lang            String?
+  imageSmall      String?
+  imageNormal     String?
+  rarity          String?
+  usd             Float?
+  eur             Float?
+  tix             Float?
+  updatedAt       DateTime @updatedAt
+}
+
+model ScryfallLookupQueue {
+  id           Int      @id @default(autoincrement())
+  cardmarketId Int
+  attempts     Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  @@index([cardmarketId])
+}

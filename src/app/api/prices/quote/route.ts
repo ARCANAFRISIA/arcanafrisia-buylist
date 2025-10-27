@@ -1,83 +1,83 @@
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { computePayoutCmix } from "@/utils/pricing";
 
-// helper: Prisma.Decimal | number | null -> number | null
-function decToNum(v: unknown): number | null {
-  if (v == null) return null;
-  if (typeof v === "number") return v;
-  // Prisma.Decimal heeft .toString()
-  const n = Number((v as any).toString?.() ?? v);
-  return Number.isFinite(n) ? n : null;
-}
-
-// round to 2 decimals (EUR)
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
-}
-
-export async function POST(req: NextRequest) {
+export async function GET(req: Request) {
   try {
-    const body = await req.json();
-    const items: Array<{ idProduct: number | string; isFoil: boolean; qty?: number }> =
-      Array.isArray(body?.items) ? body.items : [];
+    const { searchParams } = new URL(req.url);
+    const id = Number(searchParams.get("cardmarketId"));
+    const isFoil = searchParams.get("foil") === "1";
 
-    if (items.length === 0) {
-      return NextResponse.json({ ok: true, quotes: [] });
+    if (!id) {
+      return NextResponse.json({ error: "cardmarketId required" }, { status: 400 });
     }
 
-    // unieke productIds
-    const ids = Array.from(
-      new Set(
-        items
-          .map((i) =>
-            typeof i?.idProduct === "number" || typeof i?.idProduct === "string"
-              ? Number(i.idProduct)
-              : NaN
-          )
-          .filter((n) => Number.isFinite(n))
-      )
-    ) as number[];
-
-    if (ids.length === 0) {
-      return NextResponse.json({ ok: true, quotes: [] });
-    }
-
-    // RAW trends ophalen (EUR) — geen korting hier toepassen
-    const guides = await prisma.priceGuide.findMany({
-      where: { productId: { in: ids }, isCurrent: true },
-      select: { productId: true, trend: true, trendFoil: true },
+    // 1) CM record (mag ontbreken)
+    const cm = await prisma.cMPriceGuide.findUnique({
+      where: { cardmarketId: id },
     });
 
-    // map: productId -> {trend, trendFoil} als number|null
-    const byId = new Map<number, { trend: number | null; trendFoil: number | null }>();
-    for (const g of guides) {
-      byId.set(g.productId as number, {
-        trend: decToNum(g.trend),
-        trendFoil: decToNum(g.trendFoil),
+    // 2) CT min price (niet unique -> findFirst, liefst met foil, anders zonder)
+    let ctMinPrice: number | null = null;
+
+    // probeer exact foil match eerst
+    const ctExact = await prisma.cTMarketLatest.findFirst({
+      where: { cardmarketId: id, isFoil },
+      orderBy: { capturedAt: "desc" },
+      select: { minPrice: true },
+    });
+
+    if (ctExact?.minPrice != null) {
+      ctMinPrice = ctExact.minPrice;
+    } else {
+      // fallback: neem welke er is
+      const ctAny = await prisma.cTMarketLatest.findFirst({
+        where: { cardmarketId: id },
+        orderBy: { capturedAt: "desc" },
+        select: { minPrice: true },
       });
+      ctMinPrice = ctAny?.minPrice ?? null;
     }
 
-    const quotes = items.map((raw) => {
-      const idProduct = Number(raw.idProduct);
-      const isFoil = Boolean(raw.isFoil);
-      const rec = byId.get(idProduct);
+    // als zowel CM als CT ontbreken, geef dan 0 terug
+    if (!cm && ctMinPrice == null) {
+      return NextResponse.json({ id, isFoil, payout: 0, source: "none" });
+    }
 
-      const base = rec?.trend ?? 0; // non-foil
-      const foil = rec?.trendFoil;  // foil (kan null zijn)
-      const trend = isFoil ? (foil ?? base) : base;
-
-      const unit = trend != null ? round2(trend) : 0; // RAW trend in EUR (2 dec)
-      const available = !!rec && unit > 0;
-
-      return { idProduct, isFoil, unit, available };
+    const payout = computePayoutCmix({
+      cm: cm ?? {
+        trend: null, foilTrend: null, lowEx: null, suggested: null,
+        germanProLow: null, avg7: null, avg30: null, foilAvg7: null, foilAvg30: null
+      },
+      ctMinPrice,
+      isFoil,
     });
 
-    return NextResponse.json({ ok: true, quotes });
+ const sf = await prisma.scryfallLookup.findUnique({
+      where: { cardmarketId: id },
+      select: {
+        name: true,
+        set: true,
+        collectorNumber: true,
+        imageSmall: true,
+        imageNormal: true,
+      },
+    });
+
+    return NextResponse.json({
+      id,
+      isFoil,
+      payout,
+      inputs: {
+        cmTrend: isFoil ? cm?.foilTrend ?? null : cm?.trend ?? null,
+        cmLowEx: cm?.lowEx ?? null,
+        ctMinPrice,
+        avg7: isFoil ? cm?.foilAvg7 ?? null : cm?.avg7 ?? null,
+        avg30: isFoil ? cm?.foilAvg30 ?? null : cm?.avg30 ?? null,
+      },
+       scryfall: sf ?? null,
+    });
   } catch (e: any) {
-    console.error("quote error:", e);
-    return NextResponse.json({ ok: false, error: e?.message || "Internal error" }, { status: 500 });
+    return NextResponse.json({ error: e.message ?? "internal error" }, { status: 500 });
   }
 }
