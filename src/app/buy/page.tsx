@@ -56,7 +56,8 @@ const getPref = (id: string) => prefs[id] ?? { condition: "NM", foil: false };
 
     // --- per-item preferences (safe defaults) ---
 type Condition = "NM" | "EX" | "GD" | "PL" | "PO";
-type Item = (typeof items)[number];
+type BuyItem = (typeof items)[number]; // hernoemd om 'Item' collisions te vermijden
+
 
 
 
@@ -66,9 +67,9 @@ const setPrefCond = (id: string, c: Condition) =>
 const togglePrefFoil = (id: string) =>
   setPrefs((s) => ({ ...s, [id]: { ...getPref(id), foil: !getPref(id).foil } }));
 
-type Item = (typeof items)[number];
+type BuyItem = (typeof items)[number];
 
-const handleAdd = (it: Item) => {
+const handleAdd = (it: BuyItem) => {
   if (!it.payoutPreview) return;
   const p = getPref(it.id);
   cart.add({
