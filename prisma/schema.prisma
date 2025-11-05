@@ -5,6 +5,7 @@ generator client {
 datasource db {
   provider          = "postgresql"
   url               = env("DATABASE_URL")
+  directUrl         = env("DIRECT_URL")
   shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
@@ -105,8 +106,9 @@ model BlueprintMapping {
   foil            Boolean?
   setCode         String?
 
-  @@index([setCode, foil])
-  @@index([expansionId])
+  @@index([scryfallId])
+  @@index([setCode, collectorNumber])
+  @@index([cardmarketId])
 }
 
 model CTRefreshCursor {
@@ -174,9 +176,13 @@ model ScryfallLookup {
 
 model ScryfallLookupQueue {
   id           Int      @id @default(autoincrement())
-  cardmarketId Int
+  cardmarketId Int      @unique
   attempts     Int      @default(0)
   createdAt    DateTime @default(now())
-
-  @@index([cardmarketId])
+  nextTryAt    DateTime?
+  processedAt  DateTime?
+  lastError    String?
+  notFound     Boolean  @default(false)
 }
+
+

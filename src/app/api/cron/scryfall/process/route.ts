@@ -16,20 +16,27 @@ type SFResp = {
   prices?: { usd?: string | null; eur?: string | null; tix?: string | null };
 };
 
+type FetchOk = { ok: true; data: SFResp };
+type FetchErr = { ok: false; code: number };
+type FetchResult = FetchOk | FetchErr;
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+
 function parsePrice(x?: string | null): number | null {
   if (!x) return null;
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
 }
 
-async function fetchOne(cardmarketId: number): Promise<SFResp | null> {
+async function fetchOne(cardmarketId: number): Promise<FetchResult> {
   const res = await fetch(`${SCRYFALL_BASE}/${cardmarketId}`, { cache: "no-store" });
-  if (res.status === 404) return null; // bestaat niet op Scryfall
-  if (!res.ok) {
-    throw new Error(`Scryfall ${res.status} for ${cardmarketId}`);
-  }
-  return res.json();
+  if (res.status === 404) return { ok: false, code: 404 };   // definitief: bestaat niet
+  if (!res.ok) return { ok: false, code: res.status };       // tijdelijk: 429/500/etc.
+  const data = await res.json() as SFResp;
+  return { ok: true, data };
 }
+
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -57,63 +64,94 @@ export async function GET(req: Request) {
 
   for (const chunk of chunks) {
     const results = await Promise.all(
-      chunk.map(async job => {
-        try {
-          const data = await fetchOne(job.cardmarketId);
-          if (!data) {
-            // niet gevonden -> weg uit queue
-            return { jobId: job.id, del: true };
-          }
+  chunk.map(async job => {
+    try {
+      const r = await fetchOne(job.cardmarketId);
 
-          await prisma.scryfallLookup.upsert({
-            where: { cardmarketId: job.cardmarketId },
-            create: {
-              cardmarketId: job.cardmarketId,
-              scryfallId: data.id,
-              oracleId: data.oracle_id ?? null,
-              name: data.name,
-              set: data.set,
-              collectorNumber: data.collector_number ?? null,
-              lang: data.lang ?? null,
-              imageSmall: data.image_uris?.small ?? null,
-              imageNormal: data.image_uris?.normal ?? null,
-              rarity: null,
-              usd: parsePrice(data.prices?.usd) ?? null,
-              eur: parsePrice(data.prices?.eur) ?? null,
-              tix: parsePrice(data.prices?.tix) ?? null,
-            },
-            update: {
-              scryfallId: data.id,
-              oracleId: data.oracle_id ?? null,
-              name: data.name,
-              set: data.set,
-              collectorNumber: data.collector_number ?? null,
-              lang: data.lang ?? null,
-              imageSmall: data.image_uris?.small ?? null,
-              imageNormal: data.image_uris?.normal ?? null,
-              usd: parsePrice(data.prices?.usd) ?? null,
-              eur: parsePrice(data.prices?.eur) ?? null,
-              tix: parsePrice(data.prices?.tix) ?? null,
-            },
+      if (!r.ok) {
+        if (r.code === 404) {
+          // markeer definitief niet-bestaand en verwijder uit queue
+          await prisma.scryfallLookupQueue.update({
+            where: { id: job.id },
+            data: { notFound: true, lastError: "404 Not Found", processedAt: new Date() }
           });
-
-          return { jobId: job.id, del: true, ok: true };
-        } catch (e) {
-          // tijdelijke fout: één retry proberen in volgende run
-          return { jobId: job.id, retry: true };
+          return { del: true, jobId: job.id };
+        } else {
+          // tijdelijke fout: retry later
+          await prisma.scryfallLookupQueue.update({
+            where: { id: job.id },
+            data: {
+              attempts: { increment: 1 },
+              lastError: `HTTP ${r.code}`,
+              nextTryAt: new Date(Date.now() + 15 * 60 * 1000) // 15min backoff
+            }
+          });
+          return { retry: true, jobId: job.id };
         }
-      })
-    );
+      }
 
-    for (const r of results) {
-      if (r.del) toDelete.push(r.jobId);
-      else if (r.retry) toRetry.push(r.jobId);
+      const data = r.data;
+
+      await prisma.scryfallLookup.upsert({
+        where: { cardmarketId: job.cardmarketId },
+        create: {
+          cardmarketId: job.cardmarketId,
+          scryfallId: data.id,
+          oracleId: data.oracle_id ?? null,
+          name: data.name,
+          set: data.set,
+          collectorNumber: data.collector_number ?? null,
+          lang: data.lang ?? null,
+          imageSmall: data.image_uris?.small ?? null,
+          imageNormal: data.image_uris?.normal ?? null,
+          rarity: null,
+          usd: parsePrice(data.prices?.usd) ?? null,
+          eur: parsePrice(data.prices?.eur) ?? null,
+          tix: parsePrice(data.prices?.tix) ?? null,
+        },
+        update: {
+          scryfallId: data.id,
+          oracleId: data.oracle_id ?? null,
+          name: data.name,
+          set: data.set,
+          collectorNumber: data.collector_number ?? null,
+          lang: data.lang ?? null,
+          imageSmall: data.image_uris?.small ?? null,
+          imageNormal: data.image_uris?.normal ?? null,
+          usd: parsePrice(data.prices?.usd) ?? null,
+          eur: parsePrice(data.prices?.eur) ?? null,
+          tix: parsePrice(data.prices?.tix) ?? null,
+        },
+      });
+
+      return { del: true, ok: true, jobId: job.id };
+
+    } catch (e: any) {
+      // netwerk/exception → retry
+      await prisma.scryfallLookupQueue.update({
+        where: { id: job.id },
+        data: {
+          attempts: { increment: 1 },
+          lastError: String(e?.message || e),
+          nextTryAt: new Date(Date.now() + 15 * 60 * 1000)
+        }
+      });
+      return { retry: true, jobId: job.id };
     }
+  })
+);
 
-    processed += chunk.length;
+// opruimen zoals je had
+for (const r of results) {
+  if ((r as any).del) toDelete.push((r as any).jobId);
+  else if ((r as any).retry) toRetry.push((r as any).jobId);
+}
 
-    // kleine pauze tegen rate limits (ongeveer 6 parallel → ~6/s)
-    await new Promise(r => setTimeout(r, 150));
+processed += chunk.length;
+
+// kleine pauze om rate-limit te respecteren
+await sleep(150);
+
   }
 
   // verwijder successen
