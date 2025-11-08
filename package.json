@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "postinstall": "prisma generate",
-    "pg:import:cm": "ts-node --transpile-only scripts/pg-import-cm.ts"
+    "pg:import:cm": "ts-node --transpile-only scripts/pg-import-cm.ts",
+    "migrate": "prisma migrate dev",
+    "prisma:gen": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^5.16.1",

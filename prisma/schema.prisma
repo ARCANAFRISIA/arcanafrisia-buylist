@@ -185,4 +185,129 @@ model ScryfallLookupQueue {
   notFound     Boolean  @default(false)
 }
 
+model CTOrder {
+  id                    Int       @id @default(autoincrement())
+  ctOrderId             Int       @unique
+  state                 String
+  paidAt                DateTime?
+  sentAt                DateTime?
+  creditAddedAt         DateTime? // payout naar verkoper
+  currency              String    @default("EUR")
+
+  sellerTotalEur        Decimal?  // seller_total.cents / 100
+  sellerSubtotalEur     Decimal?  // seller_subtotal.cents / 100 (som lines)
+  sellerFeeEur          Decimal?  // seller_fee_amount.cents / 100
+  shippingEur           Decimal?  // order_shipping_method.seller_price.cents / 100
+
+  lineItems             CTOrderLine[]
+
+  createdAtDb           DateTime  @default(now())
+  updatedAtDb           DateTime  @updatedAt
+}
+
+model CTOrderLine {
+  id            Int      @id @default(autoincrement())
+  orderId       Int
+  order         CTOrder  @relation(fields: [orderId], references: [id])
+
+  ctLineId      Int      @unique   // <-- NIEUW: CT's eigen line-item id
+  blueprintId   Int?
+  cardmarketId  Int?
+  scryfallId    String?
+  isFoil        Boolean  @default(false)
+  condition     String?
+
+  quantity      Int
+  unitPriceEur  Decimal
+  lineGrossEur  Decimal
+
+  createdAt     DateTime?
+  commentRaw    String?
+
+  createdAtDb   DateTime  @default(now())
+  updatedAtDb   DateTime  @updatedAt
+}
+
+
+model SalesLog {
+  id           Int       @id @default(autoincrement())
+
+  source       String
+  externalId   String
+  @@unique([source, externalId], name: "source_externalId")
+
+  ts           DateTime
+
+  orderId      Int?
+  ctOrderId    Int?        // <-- alleen dit is de inhoudelijke wijziging (nullable)
+  cmOrderId    Int?
+
+  cardmarketId Int?
+  blueprintId  Int?
+  scryfallId   String?
+  isFoil       Boolean?
+  condition    String?
+  qty          Int
+
+  // Laat je geldkolommen op DECIMAL zoals ze nu zijn, zodat er geen casts nodig zijn:
+  unitPriceEur Decimal?    @db.Decimal(65, 30)
+  lineTotalEur Decimal?    @db.Decimal(65, 30)
+  shippingEur  Decimal?    @db.Decimal(65, 30)
+  feeEur       Decimal?    @db.Decimal(65, 30)
+
+  comment       String?
+  sourceCode    String?
+  sourceDate    DateTime?
+
+
+  createdAt   DateTime?  @default(now()) @map("createdAtDb")
+  updatedAt   DateTime   @default(now()) @updatedAt @map("updatedAtDb")
+}
+
+
+model CMOrder {
+  id               Int       @id @default(autoincrement())
+  cmOrderId       Int        @unique
+  state           String
+  dateBought      DateTime?  @db.Timestamptz(3)
+  datePaid        DateTime?  @db.Timestamptz(3)
+  dateSent        DateTime?  @db.Timestamptz(3)
+  dateReceived    DateTime?  @db.Timestamptz(3)
+  currency        String?    // normaal "EUR"
+  totalValueEur   Float?
+  articleCount    Int?
+  buyerUsername   String?
+  sellerUsername  String?
+
+  lines           CMOrderLine[]
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+model CMOrderLine {
+  id             Int       @id @default(autoincrement())
+  cmLineId       Int       @unique        // idArticle
+  orderId        Int
+  order          CMOrder   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  cardmarketId   Int?                      // idProduct
+  isFoil         Boolean?
+  condition      String?
+  language       String?
+  expansion      String?
+  quantity       Int
+  unitPriceEur   Float
+  lineGrossEur   Float
+  commentRaw     String?
+
+  createdAt      DateTime?  @db.Timestamptz(3)
+
+  // optioneel: scryfallId/blueprintId als je al mapping hebt
+  blueprintId    Int?
+  scryfallId     String?
+
+  @@index([orderId])
+  @@index([cardmarketId])
+}
 
