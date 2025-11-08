@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type SaleLike = {
-  id: string;
+  id: number;
   source: string | null;
   externalId: string | null;
   createdAt: Date;
@@ -139,12 +139,17 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        // 3) Markeren als toegepast
-        await tx.salesLog.update({
-          where: { id: s.id },
-          data: { inventoryAppliedAt: new Date() },
-        });
-      });
+        // 3) Markeren als toegepast (gebruik compound key als die er is)
+const whereUnique: any =
+  s.source && s.externalId
+    ? { source_externalId: { source: s.source, externalId: s.externalId } }
+    : { id: Number(s.id) }; // fallback
+
+await tx.salesLog.update({
+  where: whereUnique,
+  data: { inventoryAppliedAt: new Date() },
+});
+
     }
 
     // ---- hoofdloop ----
