@@ -226,7 +226,7 @@ model CTOrderLine {
 
   createdAtDb        DateTime  @default(now())
   updatedAtDb        DateTime  @updatedAt
-  inventoryAppliedAt DateTime?
+  
 }
 
 model SalesLog {
@@ -260,6 +260,7 @@ model SalesLog {
 
   createdAt DateTime? @default(now()) @map("createdAtDb")
   updatedAt DateTime  @default(now()) @updatedAt @map("updatedAtDb")
+  inventoryAppliedAt DateTime?
 
   @@unique([source, externalId], name: "source_externalId")
 }
