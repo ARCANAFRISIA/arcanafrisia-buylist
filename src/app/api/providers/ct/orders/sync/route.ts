@@ -155,8 +155,10 @@ export async function GET(req: Request) {
             const { code: sourceCode, date: sourceDate } = extractSourceFromComment(commentRaw);
 
             const allocRatio = linesGross > 0 ? gross / linesGross : 0;
-            const feeAlloc = order.sellerFeeEur ? Number((order.sellerFeeEur * allocRatio).toFixed(2)) : null;
-            const shipAlloc = order.shippingEur ? Number((order.shippingEur * allocRatio).toFixed(2)) : null;
+            const sellerFeeNum = order.sellerFeeEur == null ? null : Number(order.sellerFeeEur);
+            const shippingNum  = order.shippingEur == null ? null : Number(order.shippingEur);
+            const feeAlloc  = sellerFeeNum === null ? null : Math.round(sellerFeeNum * allocRatio * 100) / 100;
+            const shipAlloc = shippingNum  === null ? null : Math.round(shippingNum  * allocRatio * 100) / 100;
 
             const line = await prisma.cTOrderLine.upsert({
               where: { ctLineId },

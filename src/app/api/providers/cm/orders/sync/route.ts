@@ -238,7 +238,19 @@ export async function GET(req: Request) {
       await new Promise(r => setTimeout(r, 250));
     }
 
-    return NextResponse.json({ ok: true, actor, state, start, fetchedOrders, upsertOrders, upsertLines, salesUpserts, nextStart: cursor });
+    return NextResponse.json({
+  ok: true,
+  actor,
+  state,
+  start: cursor,
+  step,
+  fetchedOrders,
+  upsertOrders,
+  upsertLines,
+  salesUpserts,
+  nextStart: cursor + step
+});
+
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e.message ?? String(e) }, { status: 500 });
   }
