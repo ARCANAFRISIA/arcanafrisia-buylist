@@ -175,72 +175,71 @@ model ScryfallLookup {
 }
 
 model ScryfallLookupQueue {
-  id           Int      @id @default(autoincrement())
-  cardmarketId Int      @unique
-  attempts     Int      @default(0)
-  createdAt    DateTime @default(now())
+  id           Int       @id @default(autoincrement())
+  cardmarketId Int       @unique
+  attempts     Int       @default(0)
+  createdAt    DateTime  @default(now())
   nextTryAt    DateTime?
   processedAt  DateTime?
   lastError    String?
-  notFound     Boolean  @default(false)
+  notFound     Boolean   @default(false)
 }
 
 model CTOrder {
-  id                    Int       @id @default(autoincrement())
-  ctOrderId             Int       @unique
-  state                 String
-  paidAt                DateTime?
-  sentAt                DateTime?
-  creditAddedAt         DateTime? // payout naar verkoper
-  currency              String    @default("EUR")
+  id            Int       @id @default(autoincrement())
+  ctOrderId     Int       @unique
+  state         String
+  paidAt        DateTime?
+  sentAt        DateTime?
+  creditAddedAt DateTime? // payout naar verkoper
+  currency      String    @default("EUR")
 
-  sellerTotalEur        Decimal?  // seller_total.cents / 100
-  sellerSubtotalEur     Decimal?  // seller_subtotal.cents / 100 (som lines)
-  sellerFeeEur          Decimal?  // seller_fee_amount.cents / 100
-  shippingEur           Decimal?  // order_shipping_method.seller_price.cents / 100
+  sellerTotalEur    Decimal? // seller_total.cents / 100
+  sellerSubtotalEur Decimal? // seller_subtotal.cents / 100 (som lines)
+  sellerFeeEur      Decimal? // seller_fee_amount.cents / 100
+  shippingEur       Decimal? // order_shipping_method.seller_price.cents / 100
 
-  lineItems             CTOrderLine[]
+  lineItems CTOrderLine[]
 
-  createdAtDb           DateTime  @default(now())
-  updatedAtDb           DateTime  @updatedAt
+  createdAtDb DateTime @default(now())
+  updatedAtDb DateTime @updatedAt
 }
 
 model CTOrderLine {
-  id            Int      @id @default(autoincrement())
-  orderId       Int
-  order         CTOrder  @relation(fields: [orderId], references: [id])
+  id      Int     @id @default(autoincrement())
+  orderId Int
+  order   CTOrder @relation(fields: [orderId], references: [id])
 
-  ctLineId      Int      @unique   // <-- NIEUW: CT's eigen line-item id
-  blueprintId   Int?
-  cardmarketId  Int?
-  scryfallId    String?
-  isFoil        Boolean  @default(false)
-  condition     String?
+  ctLineId     Int     @unique // <-- NIEUW: CT's eigen line-item id
+  blueprintId  Int?
+  cardmarketId Int?
+  scryfallId   String?
+  isFoil       Boolean @default(false)
+  condition    String?
 
-  quantity      Int
-  unitPriceEur  Decimal
-  lineGrossEur  Decimal
+  quantity     Int
+  unitPriceEur Decimal
+  lineGrossEur Decimal
 
-  createdAt     DateTime?
-  commentRaw    String?
+  createdAt  DateTime?
+  commentRaw String?
 
-  createdAtDb   DateTime  @default(now())
-  updatedAtDb   DateTime  @updatedAt
+  createdAtDb        DateTime  @default(now())
+  updatedAtDb        DateTime  @updatedAt
+  inventoryAppliedAt DateTime?
 }
 
-
 model SalesLog {
-  id           Int       @id @default(autoincrement())
+  id Int @id @default(autoincrement())
 
-  source       String
-  externalId   String
-  @@unique([source, externalId], name: "source_externalId")
+  source     String
+  externalId String
 
-  ts           DateTime
+  ts DateTime
 
-  orderId      Int?
-  ctOrderId    Int?        // <-- alleen dit is de inhoudelijke wijziging (nullable)
-  cmOrderId    Int?
+  orderId   Int?
+  ctOrderId Int? // <-- alleen dit is de inhoudelijke wijziging (nullable)
+  cmOrderId Int?
 
   cardmarketId Int?
   blueprintId  Int?
@@ -250,64 +249,113 @@ model SalesLog {
   qty          Int
 
   // Laat je geldkolommen op DECIMAL zoals ze nu zijn, zodat er geen casts nodig zijn:
-  unitPriceEur Decimal?    @db.Decimal(65, 30)
-  lineTotalEur Decimal?    @db.Decimal(65, 30)
-  shippingEur  Decimal?    @db.Decimal(65, 30)
-  feeEur       Decimal?    @db.Decimal(65, 30)
+  unitPriceEur Decimal? @db.Decimal(65, 30)
+  lineTotalEur Decimal? @db.Decimal(65, 30)
+  shippingEur  Decimal? @db.Decimal(65, 30)
+  feeEur       Decimal? @db.Decimal(65, 30)
 
-  comment       String?
-  sourceCode    String?
-  sourceDate    DateTime?
+  comment    String?
+  sourceCode String?
+  sourceDate DateTime?
 
+  createdAt DateTime? @default(now()) @map("createdAtDb")
+  updatedAt DateTime  @default(now()) @updatedAt @map("updatedAtDb")
 
-  createdAt   DateTime?  @default(now()) @map("createdAtDb")
-  updatedAt   DateTime   @default(now()) @updatedAt @map("updatedAtDb")
+  @@unique([source, externalId], name: "source_externalId")
 }
 
-
 model CMOrder {
-  id               Int       @id @default(autoincrement())
-  cmOrderId       Int        @unique
-  state           String
-  dateBought      DateTime?  @db.Timestamptz(3)
-  datePaid        DateTime?  @db.Timestamptz(3)
-  dateSent        DateTime?  @db.Timestamptz(3)
-  dateReceived    DateTime?  @db.Timestamptz(3)
-  currency        String?    // normaal "EUR"
-  totalValueEur   Float?
-  articleCount    Int?
-  buyerUsername   String?
-  sellerUsername  String?
+  id             Int       @id @default(autoincrement())
+  cmOrderId      Int       @unique
+  state          String
+  dateBought     DateTime? @db.Timestamptz(3)
+  datePaid       DateTime? @db.Timestamptz(3)
+  dateSent       DateTime? @db.Timestamptz(3)
+  dateReceived   DateTime? @db.Timestamptz(3)
+  currency       String? // normaal "EUR"
+  totalValueEur  Float?
+  articleCount   Int?
+  buyerUsername  String?
+  sellerUsername String?
 
-  lines           CMOrderLine[]
+  lines CMOrderLine[]
 
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model CMOrderLine {
-  id             Int       @id @default(autoincrement())
-  cmLineId       Int       @unique        // idArticle
-  orderId        Int
-  order          CMOrder   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id       Int     @id @default(autoincrement())
+  cmLineId Int     @unique // idArticle
+  orderId  Int
+  order    CMOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  cardmarketId   Int?                      // idProduct
-  isFoil         Boolean?
-  condition      String?
-  language       String?
-  expansion      String?
-  quantity       Int
-  unitPriceEur   Float
-  lineGrossEur   Float
-  commentRaw     String?
+  cardmarketId Int? // idProduct
+  isFoil       Boolean?
+  condition    String?
+  language     String?
+  expansion    String?
+  quantity     Int
+  unitPriceEur Float
+  lineGrossEur Float
+  commentRaw   String?
 
-  createdAt      DateTime?  @db.Timestamptz(3)
+  createdAt DateTime? @db.Timestamptz(3)
 
   // optioneel: scryfallId/blueprintId als je al mapping hebt
-  blueprintId    Int?
-  scryfallId     String?
+  blueprintId Int?
+  scryfallId  String?
 
   @@index([orderId])
   @@index([cardmarketId])
 }
 
+model InventoryLot {
+  id             String   @id @default(cuid())
+  cardmarketId   Int
+  isFoil         Boolean  @default(false)
+  condition      String
+  qtyIn          Int
+  qtyRemaining   Int
+  avgUnitCostEur Decimal  @db.Decimal(10, 4)
+  sourceCode     String
+  sourceDate     DateTime
+  location       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([cardmarketId, isFoil, condition])
+}
+
+model InventoryBalance {
+  id             String    @id @default(cuid())
+  cardmarketId   Int
+  isFoil         Boolean   @default(false)
+  condition      String
+  qtyOnHand      Int       @default(0)
+  avgUnitCostEur Decimal?  @db.Decimal(10, 4)
+  lastSaleAt     DateTime?
+  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime  @default(now())
+
+  @@unique([cardmarketId, isFoil, condition])
+}
+
+model InventoryTxn {
+  id            String   @id @default(cuid())
+  ts            DateTime @default(now())
+  kind          String // "LOT_IN" | "SALE_OUT" | "ADJUST"
+  cardmarketId  Int
+  isFoil        Boolean  @default(false)
+  condition     String
+  qty           Int
+  unitCostEur   Decimal? @db.Decimal(10, 4)
+  refSource     String?
+  refExternalId String?
+}
+
+model SyncCursor {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
