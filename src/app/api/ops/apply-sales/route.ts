@@ -5,12 +5,13 @@ import prisma from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// Pas dit type aan jouw SalesLog model aan indien nodig.
+// Belangrijk: id is number als jouw Prisma dat zo definieert.
 type SaleLike = {
   id: number;
   source: string | null;
   externalId: string | null;
   createdAt: Date;
-  // Verwachte SKU velden in jouw SalesLog:
   cardmarketId: number | null;
   isFoil: boolean | null;
   condition: string | null;
@@ -19,7 +20,7 @@ type SaleLike = {
 
 export async function POST(req: NextRequest) {
   try {
-    // ---- Auth (optioneel, maar aanbevolen) ----
+    // ---- Auth (optioneel) ----
     const token = req.headers.get("x-admin-token");
     if (process.env.ADMIN_TOKEN && token !== process.env.ADMIN_TOKEN) {
       return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
@@ -38,9 +39,7 @@ export async function POST(req: NextRequest) {
       if (!isNaN(d.getTime())) since = d;
     }
     if (!since) {
-      const cursor = await prisma.syncCursor.findUnique({
-        where: { key: "sales.apply.since" },
-      });
+      const cursor = await prisma.syncCursor.findUnique({ where: { key: "sales.apply.since" } });
       if (cursor?.value) {
         const d = new Date(cursor.value);
         if (!isNaN(d.getTime())) since = d;
@@ -53,7 +52,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ---- candidate sales ophalen (idempotent via inventoryAppliedAt) ----
+    // ---- kandidaat-sales ophalen (idempotent via inventoryAppliedAt) ----
     const sales = (await prisma.salesLog.findMany({
       where: { inventoryAppliedAt: null, createdAt: { gte: since } },
       take,
@@ -62,20 +61,19 @@ export async function POST(req: NextRequest) {
 
     // Dry-run rapportage
     const wouldConsume: Array<{
-      salesLogId: string;
+      salesLogId: number;
       cardmarketId: number;
       isFoil: boolean;
       condition: string;
       qty: number;
     }> = [];
 
-    const errors: Array<{ salesLogId: string; message: string }> = [];
+    const errors: Array<{ salesLogId: number; message: string }> = [];
     let processed = 0;
 
     // ---- helpers ----
-    const toBool = (b: any) => (b === true || b === 1 || b === "true");
+    const toBool = (b: any) => b === true || b === 1 || b === "true" || b === "TRUE";
 
-    // FIFO apply van één sale in 1 transaction
     async function applyOneSale(s: SaleLike) {
       const cardmarketId = Number(s.cardmarketId);
       const isFoil = toBool(s.isFoil);
@@ -89,7 +87,6 @@ export async function POST(req: NextRequest) {
       await prisma.$transaction(async (tx) => {
         // 1) FIFO uit lots
         let remaining = qty;
-
         const lots = await tx.inventoryLot.findMany({
           where: { cardmarketId, isFoil, condition, qtyRemaining: { gt: 0 } },
           orderBy: [{ sourceDate: "asc" }, { createdAt: "asc" }],
@@ -120,7 +117,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // 2) Balance afboeken (kan negatief; laat zichtbaar worden)
+        // 2) Balance afboeken (kan negatief worden; maakt verschil zichtbaar)
         await tx.inventoryBalance.upsert({
           where: {
             cardmarketId_isFoil_condition: { cardmarketId, isFoil, condition },
@@ -139,17 +136,17 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        // 3) Markeren als toegepast (gebruik compound key als die er is)
-const whereUnique: any =
-  s.source && s.externalId
-    ? { source_externalId: { source: s.source, externalId: s.externalId } }
-    : { id: Number(s.id) }; // fallback
+        // 3) Markeren als toegepast (prefer compound unique, fallback id)
+        const whereUnique: any =
+          s.source && s.externalId
+            ? { source_externalId: { source: s.source, externalId: s.externalId } }
+            : { id: Number(s.id) };
 
-await tx.salesLog.update({
-  where: whereUnique,
-  data: { inventoryAppliedAt: new Date() },
-});
-
+        await tx.salesLog.update({
+          where: whereUnique,
+          data: { inventoryAppliedAt: new Date() },
+        });
+      });
     }
 
     // ---- hoofdloop ----
@@ -161,7 +158,6 @@ await tx.salesLog.update({
         const qty = Number(s.quantity || 0);
 
         if (!Number.isFinite(cardmarketId) || !condition || !Number.isFinite(qty) || qty <= 0) {
-          // sla over, maar noteer
           errors.push({ salesLogId: s.id, message: "invalid sale fields" });
           continue;
         }
@@ -181,7 +177,6 @@ await tx.salesLog.update({
         processed++;
       } catch (e: any) {
         errors.push({ salesLogId: s.id, message: String(e?.message || e) });
-        // ga door met de rest
       }
     }
 
