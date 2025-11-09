@@ -22,6 +22,27 @@ export async function GET(req: NextRequest) {
   const channel = (url.searchParams.get("channel") || "CM").toUpperCase();
   const sinceParam = url.searchParams.get("since");
   const since = sinceParam ? new Date(sinceParam) : new Date(Date.now() - 24 * 3600 * 1000);
+  const mode = (url.searchParams.get("mode") || "relist").toLowerCase(); // "relist" | "newstock"
+  const markupPct = Number(url.searchParams.get("markupPct") || "0.05"); // 5% default
+
+  async function lastSoldUnitPrice(cmid: number, isFoil: boolean, condition: string, sinceDate: Date) {
+  const row = await prisma.salesLog.findFirst({
+    where: {
+      cardmarketId: cmid,
+      isFoil,
+      condition,
+      inventoryAppliedAt: { not: null },
+      ts: { gte: sinceDate },
+    },
+    select: { unitPriceEur: true, lineTotalEur: true, qty: true, ts: true },
+    orderBy: { ts: "desc" },
+  });
+  if (!row) return null;
+  if (row.unitPriceEur != null) return Number(row.unitPriceEur);
+  if (row.lineTotalEur != null && row.qty) return Number(row.lineTotalEur) / Math.abs(Number(row.qty));
+  return null;
+}
+
 
   // Policy ophalen
   const policy = await prisma.listPolicy.findFirst({
@@ -138,12 +159,35 @@ export async function GET(req: NextRequest) {
     const ctMin   = ctMinMap.get(b.cardmarketId) ?? null;
 
     let price: number | null = null;
+
+if (mode === "relist") {
+  const last = await lastSoldUnitPrice(b.cardmarketId, b.isFoil, b.condition, since);
+  if (last != null && last > 0) {
+    price = last * (1 + (isFinite(markupPct) ? markupPct : 0.05));
+  } else {
+    // fallback: newstock-regel
+    const cmTrend = cmTrendMap.get(b.cardmarketId) ?? null;
+    const ctMin   = ctMinMap.get(b.cardmarketId) ?? null;
     if (cmTrend != null || ctMin != null) {
-      const cmUp = cmTrend != null ? cmTrend * 1.10 : 0;
-      const base = Math.max(ctMin ?? 0, cmUp);
-      const step = Number(policy.roundingStepEur ?? 0.05) || 0.05;
-      price = roundStep(base, step);
+      const base = Math.max(ctMin ?? 0, (cmTrend ?? 0) * 1.10);
+      price = base;
     }
+  }
+} else { // mode === "newstock"
+  const cmTrend = cmTrendMap.get(b.cardmarketId) ?? null;
+  const ctMin   = ctMinMap.get(b.cardmarketId) ?? null;
+  if (cmTrend != null || ctMin != null) {
+    const base = Math.max(ctMin ?? 0, (cmTrend ?? 0) * 1.10);
+    price = base;
+  }
+}
+
+// afronden
+if (price != null && price > 0) {
+  const step = Number(policy.roundingStepEur ?? 0.05) || 0.05;
+  price = roundStep(price, step);
+}
+
 
     if (price == null || !(price > 0)) {
       skippedNoPrice++;
