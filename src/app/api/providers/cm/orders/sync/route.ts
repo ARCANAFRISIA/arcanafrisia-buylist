@@ -1,5 +1,6 @@
+// src/app/api/providers/cm/orders/sync/route.ts
 export const dynamic = "force-dynamic";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server"; // ⬅️ was alleen NextResponse
 import prisma from "@/lib/prisma";
 import { buildOAuthHeader } from "@/lib/mkm";
 
@@ -9,7 +10,6 @@ const toBool = (b: any): boolean => {
   if (b === 0 || b === "0" || b === "f" || b === "F" || b === "false" || b === "FALSE") return false;
   return false; // fallback: geen null meer richting Prisma
 };
-
 
 // Zelfde extractor als CT (bron uit comment), lokaal houden om geen imports te breken
 function extractSourceFromComment(s?: string | null): { code?: string; date?: Date } {
@@ -61,7 +61,7 @@ function getArticlesArray(order: any): any[] {
 function toNumber(x: any): number | null {
   if (x == null) return null;
   if (typeof x === "number") return x;
-  if (typeof x === "string") return Number(x.replace(",", "."));
+  if (typeof x === "string") return Number(x.replace(",", ".")); // "1,23"
   return null;
 }
 function parseDate(s: any): Date | null {
@@ -73,12 +73,21 @@ function parseDate(s: any): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) { // ⬅️ was Request
+  // 🔐 Cron-bypass (zoals bij CT): Vercel-cron mag zonder admin token
+  const isCron = req.headers.get("x-vercel-cron") === "1";
+  const token = req.headers.get("x-admin-token");
+  if (!isCron) {
+    if (!token || token !== process.env.ADMIN_TOKEN) {
+      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+    }
+  }
+
   try {
     const url = new URL(req.url);
     const actor = (url.searchParams.get("actor") ?? "seller").toLowerCase(); // seller | buyer
     const state = (url.searchParams.get("state") ?? "paid").toLowerCase();   // bought | paid | sent | received | ...
-    
+
     // ✅ START is een offset (1 = eerste 100, 101 = volgende 100, enz.)
     let cursor = Math.max(1, parseInt(url.searchParams.get("start") ?? "1", 10));
     const step  = Math.max(1, parseInt(url.searchParams.get("step") ?? "100", 10)); // default = 100
@@ -102,7 +111,7 @@ export async function GET(req: Request) {
         const idOrder = o.idOrder;
 
         const stObj = typeof o.state === "object" ? o.state : {};
-        const stateStr = stObj.state ?? state;
+        const stateStr   = stObj.state ?? state;
         const dateBought = parseDate(stObj.dateBought ?? o.dateBought);
         const datePaid   = parseDate(stObj.datePaid   ?? o.datePaid);
         const dateSent   = parseDate(stObj.dateSent   ?? o.dateSent);
@@ -121,10 +130,10 @@ export async function GET(req: Request) {
           where: { cmOrderId: idOrder },
           update: {
             state: stateStr,
-            dateBought: dateBought ?? undefined,
-            datePaid:   datePaid   ?? undefined,
-            dateSent:   dateSent   ?? undefined,
-            dateReceived: dateRecv ?? undefined,
+            dateBought:   dateBought ?? undefined,
+            datePaid:     datePaid   ?? undefined,
+            dateSent:     dateSent   ?? undefined,
+            dateReceived: dateRecv   ?? undefined,
             currency,
             totalValueEur: totalValueEur ?? undefined,
             articleCount:  o.articleCount ?? undefined,
@@ -134,10 +143,10 @@ export async function GET(req: Request) {
           create: {
             cmOrderId: idOrder,
             state: stateStr,
-            dateBought: dateBought ?? undefined,
-            datePaid:   datePaid   ?? undefined,
-            dateSent:   dateSent   ?? undefined,
-            dateReceived: dateRecv ?? undefined,
+            dateBought:   dateBought ?? undefined,
+            datePaid:     datePaid   ?? undefined,
+            dateSent:     dateSent   ?? undefined,
+            dateReceived: dateRecv   ?? undefined,
             currency,
             totalValueEur: totalValueEur ?? undefined,
             articleCount:  o.articleCount ?? undefined,
@@ -242,22 +251,22 @@ export async function GET(req: Request) {
 
       // ✅ Belangrijk: MKM gebruikt offset, geen pagina-index
       cursor += step;
-      if (count < 100) break; // laatste pagina
+      if (count < 100) break; // laatste batch
       await new Promise(r => setTimeout(r, 250));
     }
 
     return NextResponse.json({
-  ok: true,
-  actor,
-  state,
-  start: cursor,
-  step,
-  fetchedOrders,
-  upsertOrders,
-  upsertLines,
-  salesUpserts,
-  nextStart: cursor + step
-});
+      ok: true,
+      actor,
+      state,
+      start: cursor,
+      step,
+      fetchedOrders,
+      upsertOrders,
+      upsertLines,
+      salesUpserts,
+      nextStart: cursor + step
+    });
 
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e.message ?? String(e) }, { status: 500 });
