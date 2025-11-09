@@ -77,8 +77,8 @@ model CTMarketSummary {
   offerCount   Int      @default(0)
 
   @@unique([blueprintId, bucket, isFoil, capturedAt])
-  @@index([capturedAt], name: "idx_ctsummary_captured")
-  @@index([blueprintId, isFoil, bucket, capturedAt], name: "idx_ctsummary_key_captured")
+  @@index([capturedAt], map: "idx_ctsummary_captured")
+  @@index([blueprintId, isFoil, bucket, capturedAt], map: "idx_ctsummary_key_captured")
 }
 
 model CTMarketLatest {
@@ -89,10 +89,10 @@ model CTMarketLatest {
   minPrice     Float?
   medianPrice  Float?
   offerCount   Int?
-  cardmarketId Int? // handig om mee te nemen
-  scryfallId   String? // idem
+  cardmarketId Int?
+  scryfallId   String?
 
-  @@id([blueprintId, bucket, isFoil]) // een enkele “laatste” snapshot per key
+  @@id([blueprintId, bucket, isFoil])
 }
 
 model BlueprintMapping {
@@ -133,27 +133,24 @@ model ScryfallCard {
 }
 
 model CMPriceGuide {
-  cardmarketId Int @id
-
+  cardmarketId Int      @id
   trend        Float?
   foilTrend    Float?
   lowEx        Float?
   suggested    Float?
   germanProLow Float?
-
-  avg1      Float?
-  avg7      Float?
-  avg30     Float?
-  foilAvg1  Float?
-  foilAvg7  Float?
-  foilAvg30 Float?
-
-  updatedAt DateTime @updatedAt
+  avg1         Float?
+  avg7         Float?
+  avg30        Float?
+  foilAvg1     Float?
+  foilAvg7     Float?
+  foilAvg30    Float?
+  updatedAt    DateTime @updatedAt
 }
 
 model CMPriceGuideQueue {
   id        Int      @id @default(autoincrement())
-  line      String // ruwe CSV-regel
+  line      String
   createdAt DateTime @default(now())
 }
 
@@ -179,119 +176,99 @@ model ScryfallLookupQueue {
   cardmarketId Int       @unique
   attempts     Int       @default(0)
   createdAt    DateTime  @default(now())
-  nextTryAt    DateTime?
-  processedAt  DateTime?
   lastError    String?
+  nextTryAt    DateTime?
   notFound     Boolean   @default(false)
+  processedAt  DateTime?
 }
 
 model CTOrder {
-  id            Int       @id @default(autoincrement())
-  ctOrderId     Int       @unique
-  state         String
-  paidAt        DateTime?
-  sentAt        DateTime?
-  creditAddedAt DateTime? // payout naar verkoper
-  currency      String    @default("EUR")
-
-  sellerTotalEur    Decimal? // seller_total.cents / 100
-  sellerSubtotalEur Decimal? // seller_subtotal.cents / 100 (som lines)
-  sellerFeeEur      Decimal? // seller_fee_amount.cents / 100
-  shippingEur       Decimal? // order_shipping_method.seller_price.cents / 100
-
-  lineItems CTOrderLine[]
-
-  createdAtDb DateTime @default(now())
-  updatedAtDb DateTime @updatedAt
+  id                Int           @id @default(autoincrement())
+  ctOrderId         Int           @unique
+  state             String
+  paidAt            DateTime?
+  sentAt            DateTime?
+  creditAddedAt     DateTime?
+  currency          String        @default("EUR")
+  sellerTotalEur    Decimal?
+  sellerSubtotalEur Decimal?
+  sellerFeeEur      Decimal?
+  shippingEur       Decimal?
+  createdAtDb       DateTime      @default(now())
+  updatedAtDb       DateTime      @updatedAt
+  lineItems         CTOrderLine[]
 }
 
 model CTOrderLine {
-  id      Int     @id @default(autoincrement())
-  orderId Int
-  order   CTOrder @relation(fields: [orderId], references: [id])
-
-  ctLineId     Int     @unique // <-- NIEUW: CT's eigen line-item id
+  id           Int       @id @default(autoincrement())
+  orderId      Int
   blueprintId  Int?
   cardmarketId Int?
   scryfallId   String?
-  isFoil       Boolean @default(false)
+  isFoil       Boolean   @default(false)
   condition    String?
-
   quantity     Int
   unitPriceEur Decimal
   lineGrossEur Decimal
-
-  createdAt  DateTime?
-  commentRaw String?
-
-  createdAtDb        DateTime  @default(now())
-  updatedAtDb        DateTime  @updatedAt
-  
+  createdAt    DateTime?
+  commentRaw   String?
+  createdAtDb  DateTime  @default(now())
+  updatedAtDb  DateTime  @updatedAt
+  ctLineId     Int       @unique
+  order        CTOrder   @relation(fields: [orderId], references: [id])
 }
 
 model SalesLog {
-  id Int @id @default(autoincrement())
-
-  source     String
-  externalId String
-
-  ts DateTime
-
-  orderId   Int?
-  ctOrderId Int? // <-- alleen dit is de inhoudelijke wijziging (nullable)
-  cmOrderId Int?
-
-  cardmarketId Int?
-  blueprintId  Int?
-  scryfallId   String?
-  isFoil       Boolean?
-  condition    String?
-  qty          Int
-
-  // Laat je geldkolommen op DECIMAL zoals ze nu zijn, zodat er geen casts nodig zijn:
-  unitPriceEur Decimal? @db.Decimal(65, 30)
-  lineTotalEur Decimal? @db.Decimal(65, 30)
-  shippingEur  Decimal? @db.Decimal(65, 30)
-  feeEur       Decimal? @db.Decimal(65, 30)
-
-  comment    String?
-  sourceCode String?
-  sourceDate DateTime?
-
-  createdAt DateTime? @default(now()) @map("createdAtDb")
-  updatedAt DateTime  @default(now()) @updatedAt @map("updatedAtDb")
+  id                 Int       @id @default(autoincrement())
+  source             String
+  externalId         String
+  orderId            Int
+  ctOrderId          Int?
+  ts                 DateTime
+  blueprintId        Int?
+  cardmarketId       Int?
+  scryfallId         String?
+  isFoil             Boolean   @default(false)
+  condition          String?
+  qty                Int
+  unitPriceEur       Decimal
+  lineTotalEur       Decimal
+  shippingEur        Decimal?
+  feeEur             Decimal?
+  comment            String?
+  sourceCode         String?
+  sourceDate         DateTime?
+  createdAt          DateTime  @default(now()) @map("createdAtDb")
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updatedAtDb")
+  cmOrderId          Int?
   inventoryAppliedAt DateTime?
 
   @@unique([source, externalId], name: "source_externalId")
 }
 
 model CMOrder {
-  id             Int       @id @default(autoincrement())
-  cmOrderId      Int       @unique
+  id             Int           @id @default(autoincrement())
+  cmOrderId      Int           @unique
   state          String
-  dateBought     DateTime? @db.Timestamptz(3)
-  datePaid       DateTime? @db.Timestamptz(3)
-  dateSent       DateTime? @db.Timestamptz(3)
-  dateReceived   DateTime? @db.Timestamptz(3)
-  currency       String? // normaal "EUR"
+  dateBought     DateTime?     @db.Timestamptz(3)
+  datePaid       DateTime?     @db.Timestamptz(3)
+  dateSent       DateTime?     @db.Timestamptz(3)
+  dateReceived   DateTime?     @db.Timestamptz(3)
+  currency       String?
   totalValueEur  Float?
   articleCount   Int?
   buyerUsername  String?
   sellerUsername String?
-
-  lines CMOrderLine[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  lines          CMOrderLine[]
 }
 
 model CMOrderLine {
-  id       Int     @id @default(autoincrement())
-  cmLineId Int     @unique // idArticle
-  orderId  Int
-  order    CMOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-
-  cardmarketId Int? // idProduct
+  id           Int       @id @default(autoincrement())
+  cmLineId     Int       @unique
+  orderId      Int
+  cardmarketId Int?
   isFoil       Boolean?
   condition    String?
   language     String?
@@ -300,12 +277,10 @@ model CMOrderLine {
   unitPriceEur Float
   lineGrossEur Float
   commentRaw   String?
-
-  createdAt DateTime? @db.Timestamptz(3)
-
-  // optioneel: scryfallId/blueprintId als je al mapping hebt
-  blueprintId Int?
-  scryfallId  String?
+  createdAt    DateTime? @db.Timestamptz(3)
+  blueprintId  Int?
+  scryfallId   String?
+  order        CMOrder   @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([cardmarketId])
@@ -345,7 +320,7 @@ model InventoryBalance {
 model InventoryTxn {
   id            String   @id @default(cuid())
   ts            DateTime @default(now())
-  kind          String // "LOT_IN" | "SALE_OUT" | "ADJUST"
+  kind          String
   cardmarketId  Int
   isFoil        Boolean  @default(false)
   condition     String

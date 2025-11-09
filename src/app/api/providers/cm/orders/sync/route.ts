@@ -3,6 +3,14 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { buildOAuthHeader } from "@/lib/mkm";
 
+const toBool = (b: any): boolean => {
+  if (b === true || b === false) return b;
+  if (b === 1 || b === "1" || b === "t" || b === "T" || b === "true" || b === "TRUE") return true;
+  if (b === 0 || b === "0" || b === "f" || b === "F" || b === "false" || b === "FALSE") return false;
+  return false; // fallback: geen null meer richting Prisma
+};
+
+
 // Zelfde extractor als CT (bron uit comment), lokaal houden om geen imports te breken
 function extractSourceFromComment(s?: string | null): { code?: string; date?: Date } {
   if (!s) return {};
@@ -195,7 +203,7 @@ export async function GET(req: Request) {
                 cardmarketId: line.cardmarketId ?? null,
                 blueprintId: null,
                 scryfallId: null,
-                isFoil: line.isFoil,
+                isFoil: toBool(line.isFoil),
                 condition: line.condition ?? null,
                 qty,
                 unitPriceEur: unit,
@@ -215,7 +223,7 @@ export async function GET(req: Request) {
                 cardmarketId: line.cardmarketId ?? null,
                 blueprintId: null,
                 scryfallId: null,
-                isFoil: line.isFoil,
+                isFoil: toBool(line.isFoil),
                 condition: line.condition ?? null,
                 qty,
                 unitPriceEur: unit,

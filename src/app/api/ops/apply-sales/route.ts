@@ -5,34 +5,73 @@ import prisma from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// Pas dit type aan jouw SalesLog model aan indien nodig.
-// Belangrijk: id is number als jouw Prisma dat zo definieert.
+// -- Types
 type SaleLike = {
   id: number;
   source: string | null;
   externalId: string | null;
-  createdAt: Date;
+  ts?: Date | null;            // aanwezig in DB; optioneel in type
+  createdAt?: Date | null;     // fallback
   cardmarketId: number | null;
+  blueprintId?: number | null; // niet vereist voor CM
   isFoil: boolean | null;
   condition: string | null;
-  quantity: number | null;
+  qty: number | null;
 };
+
+// --- helpers ---
+const toBool = (b: any): boolean | null => {
+  // ondersteunt booleans, 't'/'f', 'true'/'false', '1'/'0', 1/0
+  if (b === true || b === false) return b;
+  if (b === 1 || b === "1") return true;
+  if (b === 0 || b === "0") return false;
+  if (b === "t" || b === "T" || b === "true" || b === "TRUE") return true;
+  if (b === "f" || b === "F" || b === "false" || b === "FALSE") return false;
+  return null; // onbekend/vreemd
+};
+
+function validateCM(s: SaleLike) {
+  const missing: string[] = [];
+
+  const cmid = s.cardmarketId;
+  const foil = toBool(s.isFoil);
+  const cond = (s.condition ?? "").toString().trim();
+  const qty  = s.qty;
+
+  if (cmid == null || !Number.isInteger(cmid)) missing.push("cardmarketId");
+  if (foil == null) missing.push("isFoil");
+  if (!cond) missing.push("condition");
+  if (qty == null || !Number.isInteger(qty) || qty <= 0) missing.push("qty");
+
+  return {
+    ok: missing.length === 0,
+    normalized: {
+      cardmarketId: Number(cmid),
+      isFoil: foil ?? false,
+      condition: cond.toUpperCase(),
+      qty: Number(qty ?? 0),
+      when: (s as any).ts ?? s.createdAt ?? new Date(),
+    },
+    missing,
+  };
+}
 
 export async function POST(req: NextRequest) {
   try {
-    // ---- Auth (optioneel) ----
+    // ---- Auth ----
     const token = req.headers.get("x-admin-token");
     if (process.env.ADMIN_TOKEN && token !== process.env.ADMIN_TOKEN) {
       return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
 
+    // ---- Params ----
     const url = new URL(req.url);
     const sinceParam = url.searchParams.get("since");
     const simulate = url.searchParams.get("simulate") === "1";
     const limit = Number(url.searchParams.get("limit") || "0");
     const take = limit && limit > 0 ? limit : 500;
 
-    // ---- since vaststellen: query > cursor > anders: stop ----
+    // ---- since bepalen ----
     let since: Date | null = null;
     if (sinceParam) {
       const d = new Date(sinceParam);
@@ -53,13 +92,12 @@ export async function POST(req: NextRequest) {
     }
 
     // ---- kandidaat-sales ophalen (idempotent via inventoryAppliedAt) ----
-    const sales = (await prisma.salesLog.findMany({
-      where: { inventoryAppliedAt: null, createdAt: { gte: since } },
+    const sales = await prisma.salesLog.findMany({
+      where: { inventoryAppliedAt: null, ts: { gte: since } },
       take,
-      orderBy: { createdAt: "asc" },
-    })) as unknown as SaleLike[];
+      orderBy: { ts: "asc" },
+    });
 
-    // Dry-run rapportage
     const wouldConsume: Array<{
       salesLogId: number;
       cardmarketId: number;
@@ -68,21 +106,12 @@ export async function POST(req: NextRequest) {
       qty: number;
     }> = [];
 
-    const errors: Array<{ salesLogId: number; message: string }> = [];
+    const errors: Array<{ salesLogId: number; message: string; debug?: any }> = [];
     let processed = 0;
 
-    // ---- helpers ----
-    const toBool = (b: any) => b === true || b === 1 || b === "true" || b === "TRUE";
-
-    async function applyOneSale(s: SaleLike) {
-      const cardmarketId = Number(s.cardmarketId);
-      const isFoil = toBool(s.isFoil);
-      const condition = String(s.condition || "").toUpperCase();
-      const qty = Number(s.quantity || 0);
-
-      if (!Number.isFinite(cardmarketId) || !condition || !Number.isFinite(qty) || qty <= 0) {
-        throw new Error("invalid sale fields (cardmarketId/condition/quantity)");
-      }
+    // één sale verwerken (real run)
+    async function applyOneSale(s: SaleLike, norm: ReturnType<typeof validateCM>["normalized"]) {
+      const { cardmarketId, isFoil, condition, qty, when } = norm;
 
       await prisma.$transaction(async (tx) => {
         // 1) FIFO uit lots
@@ -103,7 +132,7 @@ export async function POST(req: NextRequest) {
             await tx.inventoryTxn.create({
               data: {
                 kind: "SALE_OUT",
-                ts: new Date(),
+                ts: when,
                 cardmarketId,
                 isFoil,
                 condition,
@@ -117,26 +146,24 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // 2) Balance afboeken (kan negatief worden; maakt verschil zichtbaar)
+        // 2) Balance afboeken
         await tx.inventoryBalance.upsert({
-          where: {
-            cardmarketId_isFoil_condition: { cardmarketId, isFoil, condition },
-          },
+          where: { cardmarketId_isFoil_condition: { cardmarketId, isFoil, condition } },
           create: {
             cardmarketId,
             isFoil,
             condition,
             qtyOnHand: -qty,
             avgUnitCostEur: null,
-            lastSaleAt: s.createdAt,
+            lastSaleAt: when,
           },
           update: {
             qtyOnHand: { decrement: qty },
-            lastSaleAt: s.createdAt,
+            lastSaleAt: when,
           },
         });
 
-        // 3) Markeren als toegepast (prefer compound unique, fallback id)
+        // 3) Markeer toegepast
         const whereUnique: any =
           s.source && s.externalId
             ? { source_externalId: { source: s.source, externalId: s.externalId } }
@@ -150,30 +177,53 @@ export async function POST(req: NextRequest) {
     }
 
     // ---- hoofdloop ----
-    for (const s of sales) {
-      try {
-        const cardmarketId = Number(s.cardmarketId);
-        const isFoil = toBool(s.isFoil);
-        const condition = String(s.condition || "").toUpperCase();
-        const qty = Number(s.quantity || 0);
+    for (const s of sales as SaleLike[]) {
+      // CM-only pad (jouw 10 rijen zijn CM)
+      const v = validateCM(s);
+      if (!v.ok) {
+        errors.push({ salesLogId: s.id, message: "invalid sale fields", debug: { missing: v.missing } });
+        continue;
+      }
 
-        if (!Number.isFinite(cardmarketId) || !condition || !Number.isFinite(qty) || qty <= 0) {
-          errors.push({ salesLogId: s.id, message: "invalid sale fields" });
-          continue;
-        }
+      // optioneel: check of voorraad > 0 voor wouldConsume (handig in simulate)
+      const bal = await prisma.inventoryBalance.findFirst({
+        where: {
+          cardmarketId: v.normalized.cardmarketId,
+          isFoil: v.normalized.isFoil,
+          condition: v.normalized.condition,
+        },
+        select: { qtyOnHand: true },
+      });
 
-        if (simulate) {
+      if (simulate) {
+        if (bal && bal.qtyOnHand > 0) {
           wouldConsume.push({
             salesLogId: s.id,
-            cardmarketId,
-            isFoil,
-            condition,
-            qty,
+            cardmarketId: v.normalized.cardmarketId,
+            isFoil: v.normalized.isFoil,
+            condition: v.normalized.condition,
+            qty: Math.min(v.normalized.qty, bal.qtyOnHand),
           });
-          continue;
+        } else {
+          errors.push({
+            salesLogId: s.id,
+            message: "no stock to consume",
+            debug: {
+              key: {
+                cardmarketId: v.normalized.cardmarketId,
+                isFoil: v.normalized.isFoil,
+                condition: v.normalized.condition,
+              },
+              qtyRequested: v.normalized.qty,
+              qtyOnHand: bal?.qtyOnHand ?? 0,
+            },
+          });
         }
+        continue;
+      }
 
-        await applyOneSale(s);
+      try {
+        await applyOneSale(s, v.normalized);
         processed++;
       } catch (e: any) {
         errors.push({ salesLogId: s.id, message: String(e?.message || e) });
