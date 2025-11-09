@@ -8,7 +8,8 @@
     { "path": "/api/providers/cm/priceguide/process", "schedule": "*/1 6-7 * * *" },
     { "path": "/api/cron/scryfall/enqueue", "schedule": "0 9 * * *" },          
     { "path": "/api/cron/scryfall/process", "schedule": "*/2 9-21 * * *" },
-    { "path": "/api/cron/ct-seller-daily", "schedule": "30 4 * * *"},
-    {  "path": "/api/cron/cm-seller-daily", "schedule": "35 5 * * *"}    
+    { "path": "/api/cron/ct-seller-daily", "schedule": "0 5,12,19 * * *" },
+    { "path": "/api/cron/cm-seller-daily", "schedule": "0 6,13,20 * * *" },
+    { "path": "/api/ops/apply-sales?limit=250", "schedule": "15 6,13,20 * * *" }    
   ]
 }
