@@ -146,22 +146,32 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // 2) Balance afboeken
-        await tx.inventoryBalance.upsert({
-          where: { cardmarketId_isFoil_condition: { cardmarketId, isFoil, condition } },
-          create: {
-            cardmarketId,
-            isFoil,
-            condition,
-            qtyOnHand: -qty,
-            avgUnitCostEur: null,
-            lastSaleAt: when,
-          },
-          update: {
-            qtyOnHand: { decrement: qty },
-            lastSaleAt: when,
-          },
-        });
+        // 2) Balance afboeken — handmatig upsert om type-mismatch te vermijden
+const existing = await tx.inventoryBalance.findFirst({
+  where: { cardmarketId, isFoil, condition },
+});
+
+if (existing) {
+  await tx.inventoryBalance.update({
+    where: { id: existing.id }, // id is bigserial in jouw schema
+    data: {
+      qtyOnHand: { decrement: qty },
+      lastSaleAt: when,
+    },
+  });
+} else {
+  await tx.inventoryBalance.create({
+    data: {
+      cardmarketId,
+      isFoil,
+      condition,
+      qtyOnHand: -qty,
+      avgUnitCostEur: null,
+      lastSaleAt: when,
+    },
+  });
+}
+
 
         // 3) Markeer toegepast
         const whereUnique: any =
