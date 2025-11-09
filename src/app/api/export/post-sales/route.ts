@@ -209,11 +209,13 @@ if (price != null && price > 0) {
   }
 
   // Cursor bijwerken: postsales.lastExportAt = now()
-  await prisma.syncCursor.upsert({
-    where: { key: "postsales.lastExportAt" },
-    update: { value: new Date().toISOString(), updatedAt: new Date() },
-    create: { key: "postsales.lastExportAt", value: new Date().toISOString(), createdAt: new Date(), updatedAt: new Date() }
-  } as any); // cast in case your model requires timestamps
+  // Cursor bijwerken: postsales.lastExportAt = now()
+await prisma.syncCursor.upsert({
+  where: { key: "postsales.lastExportAt" },
+  update: { value: new Date().toISOString(), updatedAt: new Date() },
+  create: { key: "postsales.lastExportAt", value: new Date().toISOString(), updatedAt: new Date() },
+});
+
 
   return new Response(lines.join(""), {
     headers: {
