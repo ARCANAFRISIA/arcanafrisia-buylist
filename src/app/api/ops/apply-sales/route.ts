@@ -59,10 +59,13 @@ function validateCM(s: SaleLike) {
 export async function POST(req: NextRequest) {
   try {
     // ---- Auth ----
+    const isCron = req.headers.get("x-vercel-cron") === "1";
     const token = req.headers.get("x-admin-token");
-    if (process.env.ADMIN_TOKEN && token !== process.env.ADMIN_TOKEN) {
+    if (!isCron) {
+    if (!token || token !== process.env.ADMIN_TOKEN) {
       return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
+  }
 
     // ---- Params ----
     const url = new URL(req.url);

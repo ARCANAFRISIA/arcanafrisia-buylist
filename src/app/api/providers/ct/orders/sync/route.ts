@@ -35,7 +35,7 @@ function extractSourceFromComment(s?: string | null): { code?: string; date?: Da
   return { code, date };
 }
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -63,7 +63,16 @@ async function ctFetch(path: string) {
   return res.json();
 }
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
+  // ✅ Vercel cron-bypass: cron calls mogen zonder admin-token
+  const isCron = req.headers.get("x-vercel-cron") === "1";
+  const token = req.headers.get("x-admin-token");
+  if (!isCron) {
+    if (!token || token !== process.env.ADMIN_TOKEN) {
+      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+    }
+  }
+
   try {
     const url   = new URL(req.url);
 

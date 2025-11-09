@@ -19,11 +19,21 @@ function csvEscape(s: string | number | boolean | null | undefined) {
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const channel = (url.searchParams.get("channel") || "CM").toUpperCase();
-  const sinceParam = url.searchParams.get("since");
-  const since = sinceParam ? new Date(sinceParam) : new Date(Date.now() - 24 * 3600 * 1000);
-  const mode = (url.searchParams.get("mode") || "relist").toLowerCase(); // "relist" | "newstock"
-  const markupPct = Number(url.searchParams.get("markupPct") || "0.05"); // 5% default
+const channel = (url.searchParams.get("channel") || "CM").toUpperCase();
+const mode = (url.searchParams.get("mode") || "relist").toLowerCase(); // "relist" | "newstock"
+const markupPct = Number(url.searchParams.get("markupPct") || "0.05"); // 5% default
+
+// ---- noCursor + since/cursor handling ----
+const noCursor = url.searchParams.get("noCursor") === "1";
+const sinceParam = url.searchParams.get("since");
+const cursorKey = `post_sales_export.${channel.toLowerCase()}.${mode}`; // per channel+mode
+const cursor = await prisma.syncCursor.findUnique({ where: { key: cursorKey } });
+
+const effectiveSince =
+  sinceParam ? new Date(sinceParam)
+  : cursor?.value ? new Date(cursor.value)
+  : new Date(Date.now() - 24 * 60 * 60 * 1000); // fallback 24h
+
 
   async function lastSoldUnitPrice(cmid: number, isFoil: boolean, condition: string, sinceDate: Date) {
   const row = await prisma.salesLog.findFirst({
@@ -32,7 +42,7 @@ export async function GET(req: NextRequest) {
       isFoil,
       condition,
       inventoryAppliedAt: { not: null },
-      ts: { gte: sinceDate },
+      ts: { gte: effectiveSince },
     },
     select: { unitPriceEur: true, lineTotalEur: true, qty: true, ts: true },
     orderBy: { ts: "desc" },
@@ -209,12 +219,14 @@ if (price != null && price > 0) {
   }
 
   // Cursor bijwerken: postsales.lastExportAt = now()
-  // Cursor bijwerken: postsales.lastExportAt = now()
-await prisma.syncCursor.upsert({
-  where: { key: "postsales.lastExportAt" },
-  update: { value: new Date().toISOString(), updatedAt: new Date() },
-  create: { key: "postsales.lastExportAt", value: new Date().toISOString(), updatedAt: new Date() },
-});
+  if (!noCursor) {
+  await prisma.syncCursor.upsert({
+    where: { key: cursorKey },
+    update: { value: new Date().toISOString(), updatedAt: new Date() },
+    create: { key: cursorKey, value: new Date().toISOString(), updatedAt: new Date() },
+  });
+}
+
 
 
   return new Response(lines.join(""), {
