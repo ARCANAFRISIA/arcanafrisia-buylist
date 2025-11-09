@@ -304,7 +304,7 @@ model InventoryLot {
 }
 
 model InventoryBalance {
-  id             String    @id @default(cuid())
+  id              BigInt   @id @default(autoincrement())
   cardmarketId   Int
   isFoil         Boolean   @default(false)
   condition      String
