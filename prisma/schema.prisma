@@ -335,3 +335,27 @@ model SyncCursor {
   value     String
   updatedAt DateTime @updatedAt
 }
+
+model ListPolicy {
+  id              Int              @id @default(autoincrement())
+  name            String
+  channel         String           // 'CM' | 'CT' | 'SHOP'
+  priceSource     String           // e.g. 'CT_MIN_vs_CM_TREND+10'
+  roundingStepEur Decimal?         // e.g. 0.05
+  enabled         Boolean          @default(true)
+  tiers           ListPolicyTier[]
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model ListPolicyTier {
+  id         Int        @id @default(autoincrement())
+  policyId   Int
+  minOnHand  Int        // jouw MinOnHand
+  listQty    Int        // jouw ListQty
+
+  policy     ListPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@index([policyId])
+}
