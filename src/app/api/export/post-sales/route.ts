@@ -42,7 +42,8 @@ const effectiveSince =
       isFoil,
       condition,
       inventoryAppliedAt: { not: null },
-      ts: { gte: effectiveSince },
+      ts: { gte: sinceDate },
+
     },
     select: { unitPriceEur: true, lineTotalEur: true, qty: true, ts: true },
     orderBy: { ts: "desc" },
@@ -76,20 +77,21 @@ const effectiveSince =
 
   // Verkoop-aggregatie sinds 'since'
   const soldMap = new Map<string, number>();
-  {
-    const rows: Array<{ cardmarketId: number; isFoil: boolean; condition: string; sum: number }> =
-      await prisma.$queryRawUnsafe(`
-        SELECT "cardmarketId", "isFoil", "condition", COALESCE(SUM(qty),0) AS sum
-        FROM "SalesLog"
-        WHERE "inventoryAppliedAt" IS NOT NULL
-          AND ts >= $1
-        GROUP BY 1,2,3
-      `, since);
-    for (const r of rows) {
-      const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}`;
-      soldMap.set(key, Math.abs(Number(r.sum || 0)));
-    }
+{
+  const rows: Array<{ cardmarketId: number; isFoil: boolean; condition: string; sum: number }> =
+    await prisma.$queryRaw`
+      SELECT "cardmarketId", "isFoil", "condition", COALESCE(SUM(qty),0) AS sum
+      FROM "SalesLog"
+      WHERE "inventoryAppliedAt" IS NOT NULL
+        AND ts >= ${effectiveSince}
+      GROUP BY 1,2,3
+    `;
+  for (const r of rows) {
+    const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}`;
+    soldMap.set(key, Math.abs(Number(r.sum || 0)));
   }
+}
+
 
   // Price refs (CM trend)
   const cmIds = Array.from(new Set(balances.map(b => b.cardmarketId)));
@@ -171,7 +173,8 @@ const effectiveSince =
     let price: number | null = null;
 
 if (mode === "relist") {
-  const last = await lastSoldUnitPrice(b.cardmarketId, b.isFoil, b.condition, since);
+  const last = await lastSoldUnitPrice(b.cardmarketId, b.isFoil, b.condition, effectiveSince);
+
   if (last != null && last > 0) {
     price = last * (1 + (isFinite(markupPct) ? markupPct : 0.05));
   } else {
