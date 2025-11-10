@@ -63,6 +63,19 @@ async function ctFetch(path: string) {
 export async function GET(req: NextRequest) {
   const cron = isVercelCron(req);
 
+    // TEMP DEBUG: laat zien wat de provider ziet
+  const hv = req.headers.get("x-vercel-cron") || "";
+  const ua = req.headers.get("user-agent") || "";
+
+  if (process.env.NODE_ENV === "production" && !cron) {
+    // Toon debug mee in de 401 zodat we het direct in Vercel Logs zien
+    return NextResponse.json(
+      { ok: false, error: "unauthorized", debug: { hv, ua, env: process.env.NODE_ENV } },
+      { status: 401 }
+    );
+  }
+
+
   // In production: sta cron onbeperkt toe; anders vereis ADMIN_TOKEN.
   if (process.env.NODE_ENV === "production" && !cron) {
     const token = req.headers.get("x-admin-token");
