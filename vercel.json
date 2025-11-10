@@ -9,7 +9,10 @@
     { "path": "/api/cron/scryfall/enqueue", "schedule": "0 9 * * *" },          
     { "path": "/api/cron/scryfall/process", "schedule": "*/2 9-21 * * *" },
     { "path": "/api/cron/ct-seller-daily", "schedule": "0 5,12,19 * * *" },
-    { "path": "/api/cron/cm-seller-daily", "schedule": "0 6,13,20 * * *" },
+    { "path": "/api/cron/ct-seller-daily", "schedule": "0 * * * *" },              
+    { "path": "/api/cron/cm-seller-daily?state=paid", "schedule": "5 * * * *" },   
+    { "path": "/api/cron/cm-seller-daily?state=sent", "schedule": "15 * * * *" },  
+    { "path": "/api/cron/cm-seller-daily?state=bought", "schedule": "25 * * * *" },
     { "path": "/api/ops/apply-sales?limit=250", "schedule": "15 6,13,20 * * *" }    
   ]
 }

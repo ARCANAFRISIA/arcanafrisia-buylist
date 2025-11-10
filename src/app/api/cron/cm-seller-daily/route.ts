@@ -10,39 +10,71 @@ function baseUrl() {
   return "http://localhost:3000";
 }
 
-async function hit(path: string) {
-  const url = new URL(path, baseUrl());
-  const res = await fetch(url.toString(), {
+async function hit(base: string, path: string, withBypass = false) {
+  const bypass = process.env.VERCEL_PROTECTION_BYPASS || "";
+  const url = new URL(path, base);
+
+  let res = await fetch(url.toString(), {
     method: "GET",
-    headers: { "x-vercel-cron": "1" }, // cron-bypass header
+    headers: {
+      "x-vercel-cron": "1",
+      "accept": "application/json",
+      "user-agent": "vercel-cron/1.0 (+https://vercel.com/docs/cron-jobs)",
+      ...(withBypass && bypass ? { "x-vercel-protection-bypass": bypass } : {}),
+    },
+    cache: "no-store",
     next: { revalidate: 0 },
   });
-  try {
-    const json = await res.json();
-    return { ok: res.ok, status: res.status, json };
-  } catch {
-    return { ok: res.ok, status: res.status, json: {} };
+
+  // Fallback: als Protection toch 401 geeft, probeer query-bypass
+  if (withBypass && res.status === 401) {
+    const u2 = new URL(url.toString());
+    u2.searchParams.set("x-vercel-set-bypass-cookie", "true");
+    if (bypass) u2.searchParams.set("x-vercel-protection-bypass", bypass);
+
+    res = await fetch(u2.toString(), {
+      method: "GET",
+      headers: {
+        "x-vercel-cron": "1",
+        "accept": "application/json",
+        "user-agent": "vercel-cron/1.0 (+https://vercel.com/docs/cron-jobs)",
+      },
+      cache: "no-store",
+      next: { revalidate: 0 },
+    });
   }
+
+  let body: any = null;
+  try {
+    const text = await res.text();
+    try { body = JSON.parse(text); } catch { body = { raw: text }; }
+  } catch (e: any) {
+    body = { parseError: String(e) };
+  }
+
+  return { status: res.status, ok: res.ok, body };
 }
 
 export async function GET() {
-  const results: Record<string, any> = {};
+  const base = baseUrl();
 
   const paths = [
-    "/api/providers/cm/orders/sync?actor=seller&state=bought&start=1&step=100&maxBatches=2",
-    "/api/providers/cm/orders/sync?actor=seller&state=paid&start=1&step=100&maxBatches=2",
-    "/api/providers/cm/orders/sync?actor=seller&state=sent&start=1&step=100&maxBatches=2",
-    "/api/providers/cm/orders/sync?actor=seller&state=received&start=1&step=100&maxBatches=2",
+    `/api/providers/cm/orders/sync?actor=seller&state=bought&start=1&step=100&maxBatches=2`,
+    `/api/providers/cm/orders/sync?actor=seller&state=paid&start=1&step=100&maxBatches=2`,
+    `/api/providers/cm/orders/sync?actor=seller&state=sent&start=1&step=100&maxBatches=2`,
+    
   ];
 
+  const results: Record<string, any> = {};
   for (const p of paths) {
-    results[p] = await hit(p);
+    // lokaal: withBypass=false; prod: true (maakt niet uit lokaal)
+    const r = await hit(base, p, true);
+    results[p] = r;
   }
 
-  // Als één van de hits faalt, geef 207 Multi-Status-achtig terug; anders 200
-  const anyFail = Object.values(results).some((r: any) => !r?.ok);
+  const allOk = Object.values(results).every((r: any) => r.ok);
   return NextResponse.json(
-    { ok: !anyFail, route: "cm-seller-daily", results },
-    { status: anyFail ? 207 : 200 }
+    { ok: allOk, route: "cm-seller-daily", base, results },
+    { status: allOk ? 200 : 207 } // 207 Multi-Status als er mix zit
   );
 }
