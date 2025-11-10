@@ -22,17 +22,15 @@ export async function GET() {
 const res = await fetch(url.toString(), {
   method: "GET",
   headers: {
-    // ✅ Zorg dat de provider altijd cron herkent
     "x-vercel-cron": "1",
     "accept": "application/json",
-    // ✅ Extra zekerheid: sommige paden vertrouwen op UA
     "user-agent": "vercel-cron/1.0 (+https://vercel.com/docs/cron-jobs)",
   },
   cache: "no-store",
   next: { revalidate: 0 },
 });
 
-// Probeer body te lezen, ook bij 4xx:
+// Body ook lezen bij 4xx, zodat je het in Vercel Logs terugziet
 let body: any = null;
 try {
   const text = await res.text();
@@ -40,14 +38,9 @@ try {
 } catch { body = null; }
 
 return NextResponse.json(
-  {
-    ok: res.ok,
-    status: res.status,
-    route: "ct-seller-daily",
-    base,
-    result: body,
-  },
-  { status: res.ok ? 200 : res.status }
+  { ok: res.ok, status: res.status, route: "ct-seller-daily", base, result: body },
+  { status: res.ok ? 200 : res.status, headers: { "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate" } }
 );
+
 
 }

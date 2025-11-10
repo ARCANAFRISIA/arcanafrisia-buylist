@@ -27,6 +27,7 @@ import prisma from "@/lib/prisma";
 import { isVercelCron } from "@/lib/cron";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const RAW_HOST = process.env.CT_HOST ?? "https://api.cardtrader.com";
 const CT_BASE = RAW_HOST.endsWith("/api/v2") ? RAW_HOST : `${RAW_HOST}/api/v2`;
@@ -62,20 +63,14 @@ async function ctFetch(path: string) {
 
 export async function GET(req: NextRequest) {
   const cron = isVercelCron(req);
-if (process.env.NODE_ENV === "production" && !cron) {
-  const token = req.headers.get("x-admin-token");
-  if (!token || token !== process.env.ADMIN_TOKEN) {
-    return NextResponse.json({ ok:false, error:"unauthorized" }, { status:401 });
-  }
-}
 
-
-
-  // In production: sta cron onbeperkt toe; anders vereis ADMIN_TOKEN.
   if (process.env.NODE_ENV === "production" && !cron) {
     const token = req.headers.get("x-admin-token");
     if (!token || token !== process.env.ADMIN_TOKEN) {
-      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, error: "unauthorized" },
+        { status: 401, headers: { "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate" } }
+      );
     }
   }
 
@@ -277,10 +272,14 @@ if (to)   qs.set("to", to);
       }
     }
 
-    return NextResponse.json({
-      ok: true, limit, page, states, processedOrders, linesProcessed, salesUpserts
-    });
+    return NextResponse.json(
+      { ok: true, limit, page, states, processedOrders, linesProcessed, salesUpserts },
+      { headers: { "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate" } }
+    );
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "unknown" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "unknown" },
+      { status: 500, headers: { "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate" } }
+    );
   }
 }
