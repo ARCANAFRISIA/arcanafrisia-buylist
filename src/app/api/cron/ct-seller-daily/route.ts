@@ -8,34 +8,50 @@ function baseUrl() {
   return "http://localhost:3000";
 }
 
-export async function GET() {
-  const base = baseUrl();
+const bypass = process.env.VERCEL_PROTECTION_BYPASS || "";
 
-  const url = new URL("/api/providers/ct/orders/sync", base);
-  url.searchParams.set("states", "paid,done");
-  url.searchParams.set("limit", "50");      // kleine hap
-  url.searchParams.set("page", "1");        // alleen eerste pagina
-  url.searchParams.set("maxPages", "1");    // provider loopt niet door
-  url.searchParams.set("timeBudgetMs", "45000");
-  url.searchParams.set("from", new Date(Date.now() - 48*3600*1000).toISOString().slice(0,10)); // 48u window
+const u = new URL("/api/providers/ct/orders/sync", base);
+u.searchParams.set("states", "paid,done");
+u.searchParams.set("limit", "50");
+u.searchParams.set("page", "1");
+u.searchParams.set("maxPages", "1");
+u.searchParams.set("timeBudgetMs", "45000");
+u.searchParams.set("from", new Date(Date.now() - 48 * 3600 * 1000).toISOString().slice(0, 10));
 
-const res = await fetch(url.toString(), {
+let res = await fetch(u.toString(), {
   method: "GET",
   headers: {
     "x-vercel-cron": "1",
     "accept": "application/json",
     "user-agent": "vercel-cron/1.0 (+https://vercel.com/docs/cron-jobs)",
+    // ⬇️ belangrijkste header voor Vercel Protection:
+    ...(bypass ? { "x-vercel-protection-bypass": bypass } : {}),
   },
   cache: "no-store",
   next: { revalidate: 0 },
 });
 
-// Body ook lezen bij 4xx, zodat je het in Vercel Logs terugziet
+// fallback: als het tóch een 401 protection page is, probeer query-bypass
+if (res.status === 401) {
+  u.searchParams.set("x-vercel-set-bypass-cookie", "true");
+  if (bypass) u.searchParams.set("x-vercel-protection-bypass", bypass);
+  res = await fetch(u.toString(), {
+    method: "GET",
+    headers: {
+      "x-vercel-cron": "1",
+      "accept": "application/json",
+      "user-agent": "vercel-cron/1.0 (+https://vercel.com/docs/cron-jobs)",
+    },
+    cache: "no-store",
+    next: { revalidate: 0 },
+  });
+}
+
 let body: any = null;
 try {
   const text = await res.text();
-  try { body = JSON.parse(text); } catch { body = { raw: text }; }
-} catch { body = null; }
+  try { body = JSON.parse(text); } catch { body = { raw: text } }
+} catch {}
 
 return NextResponse.json(
   { ok: res.ok, status: res.status, route: "ct-seller-daily", base, result: body },
@@ -43,4 +59,5 @@ return NextResponse.json(
 );
 
 
-}
+
+
