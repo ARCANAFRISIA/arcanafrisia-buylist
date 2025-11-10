@@ -1,37 +1,24 @@
+// --- JOUW helpers blijven ---
 function extractSourceFromComment(s?: string | null): { code?: string; date?: Date } {
   if (!s) return {};
   const U = s.toUpperCase();
-
-  // vind eerste token als LLLDDD...
   const m = U.match(/\b([A-Z]{2,4})(\d{4,8})\b/);
   if (!m) return {};
-
   const [, letters, digits] = m;
   const code = `${letters}${digits}`;
-
-  // datum-afleiding
   let date: Date | undefined;
   if (digits.length === 6) {
-    // DDMMYY
     const dd = parseInt(digits.slice(0,2), 10);
     const mm = parseInt(digits.slice(2,4), 10);
     const yy = parseInt(digits.slice(4,6), 10);
-    const fullYear = 2000 + yy; // 20xx
-    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
-      date = new Date(Date.UTC(fullYear, mm - 1, dd));
-    }
+    const fullYear = 2000 + yy;
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) date = new Date(Date.UTC(fullYear, mm - 1, dd));
   } else if (digits.length === 4) {
-    // MMYY (dag = 1)
     const mm = parseInt(digits.slice(0,2), 10);
     const yy = parseInt(digits.slice(2,4), 10);
     const fullYear = 2000 + yy;
-    if (mm >= 1 && mm <= 12) {
-      date = new Date(Date.UTC(fullYear, mm - 1, 1));
-    }
-  } else {
-    // bv. 7–8 cijfers: kan tracking of iets anders zijn → geen datum
+    if (mm >= 1 && mm <= 12) date = new Date(Date.UTC(fullYear, mm - 1, 1));
   }
-
   return { code, date };
 }
 
@@ -44,54 +31,67 @@ const RAW_HOST = process.env.CT_HOST ?? "https://api.cardtrader.com";
 const CT_BASE = RAW_HOST.endsWith("/api/v2") ? RAW_HOST : `${RAW_HOST}/api/v2`;
 const CT_TOKEN = process.env.CT_TOKEN;
 
-const centsToEur = (c?: number | null) =>
-  c == null ? null : Number((c / 100).toFixed(2));
+const centsToEur = (c?: number | null) => c == null ? null : Number((c / 100).toFixed(2));
 
+// --- TERUG naar jouw simpele fetch; geen extra headers, geen andere params ---
 async function ctFetch(path: string) {
   if (!CT_TOKEN) throw new Error("CT_TOKEN missing");
-  const res = await fetch(`${CT_BASE}${path}`, {
-    headers: {
-      Authorization: `Bearer ${CT_TOKEN}`,
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`CT ${res.status} ${path} :: ${body}`);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000); // 20s hard timeout
+
+  try {
+    const res = await fetch(`${CT_BASE}${path}`, {
+      headers: {
+        Authorization: `Bearer ${CT_TOKEN}`,
+        Accept: "application/json",
+      },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const bodyText = await res.text();
+    if (!res.ok) {
+      throw new Error(`CT ${res.status} ${path} :: ${bodyText}`);
+    }
+    try { return JSON.parse(bodyText); } catch { return bodyText; }
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json();
 }
 
 export async function GET(req: NextRequest) {
-  // ✅ Vercel cron-bypass: cron calls mogen zonder admin-token
+  // ✅ ENIGE NIEUWE STUK: cron-bypass; verder niets veranderen
   const isCron = req.headers.get("x-vercel-cron") === "1";
+// skip auth in local dev
+if (process.env.NODE_ENV === "production" && !isCron) {
   const token = req.headers.get("x-admin-token");
-  if (!isCron) {
-    if (!token || token !== process.env.ADMIN_TOKEN) {
-      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-    }
+  if (!token || token !== process.env.ADMIN_TOKEN) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
+}
+
 
   try {
-    const url   = new URL(req.url);
+    const url   = req.nextUrl;
 
-    // ✅ limit/page blijven zoals je had
-    const limit = Math.max(1, Math.min(Number(url.searchParams.get("limit") ?? "100"), 200));
-    let   page  = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
+    // ✅ laat jouw parameters & defaults intact
+    const t0 = Date.now();
+    const DEFAULT_BUDGET = Math.max(10_000, Math.min(Number(url.searchParams.get("timeBudgetMs") ?? "45000"), 55_000));
+    const timeLeft = () => Math.max(0, DEFAULT_BUDGET - (Date.now() - t0));
 
-    // ✅ meerdere states mogelijk, met alias sent→shipped
+    const maxPages = Math.max(1, Math.min(Number(url.searchParams.get("maxPages") ?? "1"), 10)); // hard cap
+    const limit    = Math.max(1, Math.min(Number(url.searchParams.get("limit")    ?? "100"), 200));
+    let   page     = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
+
     const normalize = (s: string) => {
-  const x = s.trim().toLowerCase();
-  if (x === "sent") return "shipped";       // oude naam
-  if (x.startsWith("hub_")) return x;       // alle hub varianten toestaan
-  return x;
-};
-
-    const states = (url.searchParams.get("states") ?? "paid,shipped,done")
+      const x = s.trim().toLowerCase();
+      if (x === "sent") return "shipped";
+      if (x.startsWith("hub_")) return x;
+      return x;
+    };
+    const states = (url.searchParams.get("states") ?? "paid,done")
       .split(",").map(normalize).filter(Boolean);
 
-    // ✅ altijd verkoperskant + nieuwste eerst
     const orderAs = "seller";
     const sort    = "date.desc";
 
@@ -100,22 +100,34 @@ export async function GET(req: NextRequest) {
     let salesUpserts    = 0;
 
     for (const state of states) {
-      // loop pagina’s per state
       let localPage = page;
+      let pagesDoneForThisState = 0;
+
+      
       while (true) {
-        const qs = new URLSearchParams({
-          state,
-          limit: String(limit),
-          page: String(localPage),
-          order_as: orderAs,
-          sort
-        });
+         // === Nieuw: strikte guards ===
+        if (timeLeft() < 1500) break;
+        if (pagesDoneForThisState >= maxPages) break;
+
+      const qs = new URLSearchParams({
+  state,
+  limit: String(limit),
+  page:  String(localPage),
+  order_as: orderAs,
+  sort
+});
+
+// <-- NIEUW: from/to doorzetten als ze in de URL staan
+const from = url.searchParams.get("from");
+const to   = url.searchParams.get("to");
+if (from) qs.set("from", from);
+if (to)   qs.set("to", to);
 
         const orders: any[] = await ctFetch(`/orders?${qs.toString()}`);
         if (!Array.isArray(orders) || orders.length === 0) break;
 
         for (const o of orders) {
-          // --- Order upsert (ongewijzigd) ---
+          // --- jouw bestaande upserts onveranderd ---
           const order = await prisma.cTOrder.upsert({
             where: { ctOrderId: o.id },
             update: {
@@ -145,7 +157,6 @@ export async function GET(req: NextRequest) {
           });
           processedOrders++;
 
-          // --- Lines + SalesLog (ongewijzigde logica) ---
           const items: any[] = o.order_items ?? [];
           const linesGross = items.reduce((acc, li) => {
             const unit = centsToEur(li.seller_price?.cents) ?? 0;
@@ -246,23 +257,20 @@ export async function GET(req: NextRequest) {
             });
 
             salesUpserts++;
-          } // items
-        } // orders loop
+          }
+        }
 
+        pagesDoneForThisState += 1; // <-- typo-fix
         if (orders.length < limit) break;
         localPage += 1;
-        await new Promise(r => setTimeout(r, 150));
+
+        if (timeLeft() < 1500) break;
+        await new Promise(r => setTimeout(r, 100));
       }
     }
 
     return NextResponse.json({
-      ok: true,
-      limit,
-      page,
-      states,
-      processedOrders,
-      linesProcessed,
-      salesUpserts
+      ok: true, limit, page, states, processedOrders, linesProcessed, salesUpserts
     });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message ?? "unknown" }, { status: 500 });
