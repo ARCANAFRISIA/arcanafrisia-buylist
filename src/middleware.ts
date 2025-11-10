@@ -1,6 +1,13 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
+function isCron(req: NextRequest) {
+  const hv = (req.headers.get("x-vercel-cron") || "").trim();
+  if (hv === "1") return true;
+  const ua = (req.headers.get("user-agent") || "").toLowerCase();
+  return ua.startsWith("vercel-cron/");
+}
+
 function unauthorized() {
   return new NextResponse("Unauthorized", {
     status: 401,
@@ -34,6 +41,10 @@ function checkBasicAuth(req: NextRequest) {
 
 export function middleware(req: NextRequest) {
   const p = req.nextUrl.pathname;
+
+  if (isCron(req)) {
+  return NextResponse.next();
+}
 
   // 🔓 BYPASS CM provider endpoints (no auth)
   if (

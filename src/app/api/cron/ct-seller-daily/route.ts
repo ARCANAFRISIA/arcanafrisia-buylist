@@ -20,10 +20,15 @@ export async function GET() {
   url.searchParams.set("from", new Date(Date.now() - 48*3600*1000).toISOString().slice(0,10)); // 48u window
 
   const res = await fetch(url.toString(), {
-    method: "GET",
-    headers: { "x-vercel-cron": "1" },
-    next: { revalidate: 0 },
-  });
+  method: "GET",
+  headers: {
+    "x-vercel-cron": "1",       // ✅ essentieel
+    "accept": "application/json"
+  },
+  cache: "no-store",            // ✅ voorkom caching
+  next: { revalidate: 0 },
+});
+
 
   const json = await res.json().catch(() => ({}));
   return NextResponse.json(

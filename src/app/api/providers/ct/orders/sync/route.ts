@@ -24,6 +24,7 @@ function extractSourceFromComment(s?: string | null): { code?: string; date?: Da
 
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { isVercelCron } from "@/lib/cron";
 
 export const dynamic = "force-dynamic";
 
@@ -60,16 +61,15 @@ async function ctFetch(path: string) {
 }
 
 export async function GET(req: NextRequest) {
-  // ✅ ENIGE NIEUWE STUK: cron-bypass; verder niets veranderen
-  const isCron = req.headers.get("x-vercel-cron") === "1";
-// skip auth in local dev
-if (process.env.NODE_ENV === "production" && !isCron) {
-  const token = req.headers.get("x-admin-token");
-  if (!token || token !== process.env.ADMIN_TOKEN) {
-    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-  }
-}
+  const cron = isVercelCron(req);
 
+  // In production: sta cron onbeperkt toe; anders vereis ADMIN_TOKEN.
+  if (process.env.NODE_ENV === "production" && !cron) {
+    const token = req.headers.get("x-admin-token");
+    if (!token || token !== process.env.ADMIN_TOKEN) {
+      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+    }
+  }
 
   try {
     const url   = req.nextUrl;
