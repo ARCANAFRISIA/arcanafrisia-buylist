@@ -19,20 +19,35 @@ export async function GET() {
   url.searchParams.set("timeBudgetMs", "45000");
   url.searchParams.set("from", new Date(Date.now() - 48*3600*1000).toISOString().slice(0,10)); // 48u window
 
-  const res = await fetch(url.toString(), {
+const res = await fetch(url.toString(), {
   method: "GET",
   headers: {
-    "x-vercel-cron": "1",       // ✅ essentieel
-    "accept": "application/json"
+    // ✅ Zorg dat de provider altijd cron herkent
+    "x-vercel-cron": "1",
+    "accept": "application/json",
+    // ✅ Extra zekerheid: sommige paden vertrouwen op UA
+    "user-agent": "vercel-cron/1.0 (+https://vercel.com/docs/cron-jobs)",
   },
-  cache: "no-store",            // ✅ voorkom caching
+  cache: "no-store",
   next: { revalidate: 0 },
 });
 
+// Probeer body te lezen, ook bij 4xx:
+let body: any = null;
+try {
+  const text = await res.text();
+  try { body = JSON.parse(text); } catch { body = { raw: text }; }
+} catch { body = null; }
 
-  const json = await res.json().catch(() => ({}));
-  return NextResponse.json(
-    { ok: res.ok, status: res.status, route: "ct-seller-daily", base, result: json },
-    { status: res.ok ? 200 : res.status }
-  );
+return NextResponse.json(
+  {
+    ok: res.ok,
+    status: res.status,
+    route: "ct-seller-daily",
+    base,
+    result: body,
+  },
+  { status: res.ok ? 200 : res.status }
+);
+
 }
