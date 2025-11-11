@@ -13,6 +13,7 @@
     { "path": "/api/cron/cm-seller-daily?state=paid", "schedule": "5 * * * *" },   
     { "path": "/api/cron/cm-seller-daily?state=sent", "schedule": "15 * * * *" },  
     { "path": "/api/cron/cm-seller-daily?state=bought", "schedule": "25 * * * *" },
-    { "path": "/api/ops/apply-sales?limit=250", "schedule": "15 6,13,20 * * *" }    
+    { "path": "//api/cron/apply-sales", "schedule": "15 6,13,20 * * *" },
+    { "path": "/api/cron//ct-seller-catchup", "schedule": "15 2 * * *" }    
   ]
 }

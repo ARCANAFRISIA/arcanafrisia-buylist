@@ -13,16 +13,15 @@ export async function GET() {
   const base = baseUrl();
   const bypass = process.env.VERCEL_PROTECTION_BYPASS || "";
 
-  // Bouw URL + params (dagelijks: paid/done, iets breder venster)
+  // Catch-up sweep: ruimer venster + extra states + meer pagina's
   const u = new URL("/api/providers/ct/orders/sync", base);
-  u.searchParams.set("states", "paid,done");
-  u.searchParams.set("limit", "100");             // grotere hap
+  u.searchParams.set("states", "paid,done,shipped,hub_pending,hub_shipped");
+  u.searchParams.set("limit", "100");
   u.searchParams.set("page", "1");
-  u.searchParams.set("maxPages", "2");            // pagina 1–2
-  u.searchParams.set("timeBudgetMs", "45000");
-  u.searchParams.set("from", new Date(Date.now() - 72 * 3600 * 1000).toISOString().slice(0, 10)); // 72h window
+  u.searchParams.set("maxPages", "3");            // ga dieper (1–3)
+  u.searchParams.set("timeBudgetMs", "55000");    // iets ruimer
+  u.searchParams.set("from", new Date(Date.now() - 4 * 24 * 3600 * 1000).toISOString().slice(0, 10)); // 4 dagen
 
-  // Eerste poging: cron-header + UA + (optioneel) protection-bypass
   let res = await fetch(u.toString(), {
     method: "GET",
     headers: {
@@ -35,7 +34,6 @@ export async function GET() {
     next: { revalidate: 0 },
   });
 
-  // Fallback bij 401: query-bypass
   if (res.status === 401) {
     const u2 = new URL(u.toString());
     u2.searchParams.set("x-vercel-set-bypass-cookie", "true");
@@ -53,7 +51,6 @@ export async function GET() {
     });
   }
 
-  // Body altijd proberen te lezen (handig voor logs)
   let body: any = null;
   try {
     const text = await res.text();
@@ -61,7 +58,7 @@ export async function GET() {
   } catch { body = null; }
 
   return NextResponse.json(
-    { ok: res.ok, status: res.status, route: "ct-seller-daily", base, result: body },
+    { ok: res.ok, status: res.status, route: "ct-seller-catchup", base, result: body },
     { status: res.ok ? 200 : res.status, headers: { "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate" } }
   );
 }

@@ -30,12 +30,36 @@ const toBool = (b: any): boolean | null => {
   return null; // onbekend/vreemd
 };
 
+function normalizeCMCondition(raw: string): string {
+  const s = raw.trim().toUpperCase().replace(/\s+/g, " ");
+  const map: Record<string, string> = {
+    // CM set
+    "M": "MT", "MT": "MT", "MINT": "MT",
+
+    "NM": "NM", "NEAR MINT": "NM", "NEARMINT": "NM", "NEAR_MINT": "NM",
+
+    "EX": "EX", "EXCELLENT": "EX", "SLIGHTLY PLAYED": "EX",
+    "SLIGHTLY-PLAYED": "EX", "SP": "EX",
+
+    "GD": "GD", "GOOD": "GD", "Moderately Played": "GD",
+    "Moderately-Played": "GD", "MP": "GD",
+
+    "LP": "LP", "LIGHT PLAYED": "LP", "LIGHTLY PLAYED": "LP", "LIGHT-PLAYED": "LP",
+
+    "PL": "PL", "PLAYED": "PL",
+
+    "PO": "PO", "P": "PO", "POOR": "PO",
+  };
+  return map[s] ?? s; // als onbekend, laat omhoog gecapte string staan
+}
+
+
 function validateCM(s: SaleLike) {
   const missing: string[] = [];
 
   const cmid = s.cardmarketId;
   const foil = toBool(s.isFoil);
-  const cond = (s.condition ?? "").toString().trim();
+  const cond = normalizeCMCondition((s.condition ?? "").toString()); // ⬅️ hier
   const qty  = s.qty;
 
   if (cmid == null || !Number.isInteger(cmid)) missing.push("cardmarketId");
@@ -48,13 +72,14 @@ function validateCM(s: SaleLike) {
     normalized: {
       cardmarketId: Number(cmid),
       isFoil: foil ?? false,
-      condition: cond.toUpperCase(),
+      condition: cond,                       // ⬅️ genormaliseerd
       qty: Number(qty ?? 0),
       when: (s as any).ts ?? s.createdAt ?? new Date(),
     },
     missing,
   };
 }
+
 
 export async function POST(req: NextRequest) {
   try {
@@ -120,9 +145,16 @@ export async function POST(req: NextRequest) {
         // 1) FIFO uit lots
         let remaining = qty;
         const lots = await tx.inventoryLot.findMany({
-          where: { cardmarketId, isFoil, condition, qtyRemaining: { gt: 0 } },
-          orderBy: [{ sourceDate: "asc" }, { createdAt: "asc" }],
-        });
+  where: {
+    cardmarketId,
+    isFoil,
+    condition,
+    qtyRemaining: { gt: 0 },
+    sourceDate: { lte: when },        // ⬅️ verbruik geen voorraad na de sale-tijd
+  },
+  orderBy: [{ sourceDate: "asc" }, { createdAt: "asc" }],
+});
+
 
         for (const lot of lots) {
           if (remaining <= 0) break;
@@ -198,42 +230,66 @@ if (existing) {
         continue;
       }
 
-      // optioneel: check of voorraad > 0 voor wouldConsume (handig in simulate)
-      const bal = await prisma.inventoryBalance.findFirst({
-        where: {
+      // ---- SIMULATE: kijk eerst naar Balance; zo niet, val terug op Lots (met cutoff op sale.ts) ----
+if (simulate) {
+  const cutoff = v.normalized.when; // verbruik geen voorraad die na de sale is binnengekomen
+
+  // 1) Balance
+  const bal = await prisma.inventoryBalance.findFirst({
+    where: {
+      cardmarketId: v.normalized.cardmarketId,
+      isFoil: v.normalized.isFoil,
+      condition: v.normalized.condition,
+    },
+    select: { qtyOnHand: true },
+  });
+
+  let avail = bal?.qtyOnHand ?? 0;
+
+  // 2) Fallback: Lots (alleen wat al binnen was vóór/óp de sale)
+  if (!avail || avail <= 0) {
+    const lotsAgg = await prisma.inventoryLot.aggregate({
+      _sum: { qtyRemaining: true },
+      where: {
+        cardmarketId: v.normalized.cardmarketId,
+        isFoil: v.normalized.isFoil,
+        condition: v.normalized.condition,
+        qtyRemaining: { gt: 0 },
+        ...(cutoff ? { sourceDate: { lte: cutoff } } : {}), // cutoff is belangrijk
+      },
+    });
+    avail = Number(lotsAgg._sum.qtyRemaining ?? 0);
+  }
+
+  if (avail > 0) {
+    wouldConsume.push({
+      salesLogId: s.id,
+      cardmarketId: v.normalized.cardmarketId,
+      isFoil: v.normalized.isFoil,
+      condition: v.normalized.condition,
+      qty: Math.min(v.normalized.qty, avail),
+    });
+  } else {
+    errors.push({
+      salesLogId: s.id,
+      message: "no stock to consume",
+      debug: {
+        key: {
           cardmarketId: v.normalized.cardmarketId,
           isFoil: v.normalized.isFoil,
           condition: v.normalized.condition,
         },
-        select: { qtyOnHand: true },
-      });
+        qtyRequested: v.normalized.qty,
+        // voor diagnose:
+        qtyOnHand: bal?.qtyOnHand ?? 0,
+        lotsQtyRemaining: avail,
+        cutoff: cutoff?.toISOString() ?? null,
+      },
+    });
+  }
+  continue;
+}
 
-      if (simulate) {
-        if (bal && bal.qtyOnHand > 0) {
-          wouldConsume.push({
-            salesLogId: s.id,
-            cardmarketId: v.normalized.cardmarketId,
-            isFoil: v.normalized.isFoil,
-            condition: v.normalized.condition,
-            qty: Math.min(v.normalized.qty, bal.qtyOnHand),
-          });
-        } else {
-          errors.push({
-            salesLogId: s.id,
-            message: "no stock to consume",
-            debug: {
-              key: {
-                cardmarketId: v.normalized.cardmarketId,
-                isFoil: v.normalized.isFoil,
-                condition: v.normalized.condition,
-              },
-              qtyRequested: v.normalized.qty,
-              qtyOnHand: bal?.qtyOnHand ?? 0,
-            },
-          });
-        }
-        continue;
-      }
 
       try {
         await applyOneSale(s, v.normalized);
