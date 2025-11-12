@@ -42,7 +42,7 @@ function normalizeCMCondition(raw: string): string {
     "SLIGHTLY-PLAYED": "EX", "SP": "EX",
 
     "GD": "GD", "GOOD": "GD", "Moderately Played": "GD",
-    "Moderately-Played": "GD", "MP": "GD",
+    "Moderately-Played": "GD", "MP": "GD", "MODERATELY PLAYED": "GD",
 
     "LP": "LP", "LIGHT PLAYED": "LP", "LIGHTLY PLAYED": "LP", "LIGHT-PLAYED": "LP",
 
@@ -52,6 +52,8 @@ function normalizeCMCondition(raw: string): string {
   };
   return map[s] ?? s; // als onbekend, laat omhoog gecapte string staan
 }
+
+
 
 
 function validateCM(s: SaleLike) {
@@ -99,6 +101,10 @@ export async function POST(req: NextRequest) {
     const limit = Number(url.searchParams.get("limit") || "0");
     const take = limit && limit > 0 ? limit : 500;
 
+    const onlySource = url.searchParams.get("onlySource");     // bv. "CT" of "CM"
+    const onlyCtOrderId = url.searchParams.get("ctOrderId");   // bv. "123456789"
+    const idsParam = url.searchParams.get("ids");              // bv. "441191,441190"
+
     // ---- since bepalen ----
     let since: Date | null = null;
     if (sinceParam) {
@@ -112,19 +118,34 @@ export async function POST(req: NextRequest) {
         if (!isNaN(d.getTime())) since = d;
       }
     }
-    if (!since) {
-      return NextResponse.json(
-        { ok: false, error: "missing since (provide ?since=... or set SyncCursor sales.apply.since)" },
-        { status: 400 },
-      );
-    }
+    const hasExplicitSelection =
+  !!onlyCtOrderId || !!idsParam; // gericht selecteren
+
+// since mag ontbreken als we expliciet selecteren
+if (!hasExplicitSelection && !since) {
+  return NextResponse.json(
+    { ok: false, error: "missing since (provide ?since=... or set SyncCursor sales.apply.since)" },
+    { status: 400 },
+  );
+}
+
+const where: any = { inventoryAppliedAt: null };
+
+if (!hasExplicitSelection && since) where.ts = { gte: since };
+if (onlySource) where.source = onlySource;
+if (onlyCtOrderId) {
+  where.ctOrderId = Number(onlyCtOrderId);
+  // optioneel strakker: CT-only als je ctOrderId gebruikt
+  if (!onlySource) where.source = "CT";
+}
+if (idsParam) {
+  const ids = idsParam.split(",").map(x => Number(x.trim())).filter(n => Number.isInteger(n));
+  if (ids.length) where.id = { in: ids };
+}
 
     // ---- kandidaat-sales ophalen (idempotent via inventoryAppliedAt) ----
-    const sales = await prisma.salesLog.findMany({
-      where: { inventoryAppliedAt: null, ts: { gte: since } },
-      take,
-      orderBy: { ts: "asc" },
-    });
+    const sales = await prisma.salesLog.findMany({ where, take, orderBy: { ts: "asc" } });
+
 
     const wouldConsume: Array<{
       salesLogId: number;

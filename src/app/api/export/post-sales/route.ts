@@ -19,6 +19,7 @@ function csvEscape(s: string | number | boolean | null | undefined) {
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
+const normalize = url.searchParams.get("normalize") === "1";
 const channel = (url.searchParams.get("channel") || "CM").toUpperCase();
 const mode = (url.searchParams.get("mode") || "relist").toLowerCase(); // "relist" | "newstock"
 const markupPct = Number(url.searchParams.get("markupPct") || "0.05"); // 5% default
@@ -26,7 +27,7 @@ const markupPct = Number(url.searchParams.get("markupPct") || "0.05"); // 5% def
 // ---- noCursor + since/cursor handling ----
 const noCursor = url.searchParams.get("noCursor") === "1";
 const sinceParam = url.searchParams.get("since");
-const cursorKey = `post_sales_export.${channel.toLowerCase()}.${mode}`; // per channel+mode
+const cursorKey = "postsales.lastExportAt";
 const cursor = await prisma.syncCursor.findUnique({ where: { key: cursorKey } });
 
 const effectiveSince =
@@ -76,21 +77,61 @@ const effectiveSince =
   });
 
   // Verkoop-aggregatie sinds 'since'
-  const soldMap = new Map<string, number>();
+const soldMap = new Map<string, number>();
 {
-  const rows: Array<{ cardmarketId: number; isFoil: boolean; condition: string; sum: number }> =
-    await prisma.$queryRaw`
+  type SoldAggRow = {
+    cardmarketId: number;
+    isFoil: boolean;
+    condition: string;
+    sum: number;
+  };
+
+  let rows: SoldAggRow[];
+
+  if (!normalize) {
+    // Huidig gedrag (geen mapping)
+    rows = await prisma.$queryRaw<SoldAggRow[]>`
       SELECT "cardmarketId", "isFoil", "condition", COALESCE(SUM(qty),0) AS sum
       FROM "SalesLog"
       WHERE "inventoryAppliedAt" IS NOT NULL
         AND ts >= ${effectiveSince}
       GROUP BY 1,2,3
     `;
+  } else {
+    // CT → ArcanaFrisia canon:
+    // Near Mint→NM, Slightly Played→EX, Moderately Played→GD, Played→LP, Heavily Played→PL
+    rows = await prisma.$queryRawUnsafe<SoldAggRow[]>(`
+      SELECT
+        "cardmarketId",
+        COALESCE("isFoil", false) AS "isFoil",
+        CASE
+          WHEN "condition" IS NULL                 THEN 'NM'
+          WHEN "condition" ILIKE 'Near Mint'       THEN 'NM'
+          WHEN "condition" ILIKE 'Slightly Played' THEN 'EX'
+          WHEN "condition" ILIKE 'Moderately Played' THEN 'GD'
+          WHEN "condition" ILIKE 'Played'          THEN 'LP'
+          WHEN "condition" ILIKE 'Heavily Played'  THEN 'PL'
+          WHEN "condition" ILIKE 'NM'              THEN 'NM'
+          WHEN "condition" ILIKE 'EX'              THEN 'EX'
+          WHEN "condition" ILIKE 'GD'              THEN 'GD'
+          WHEN "condition" ILIKE 'LP'              THEN 'LP'
+          WHEN "condition" ILIKE 'PL'              THEN 'PL'
+          ELSE UPPER("condition")
+        END AS "condition",
+        COALESCE(SUM(qty),0) AS sum
+      FROM "SalesLog"
+      WHERE "inventoryAppliedAt" IS NOT NULL
+        AND ts >= $1
+      GROUP BY 1,2,3
+    `, effectiveSince as any);
+  }
+
   for (const r of rows) {
     const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}`;
     soldMap.set(key, Math.abs(Number(r.sum || 0)));
   }
 }
+
 
 
   // Price refs (CM trend)

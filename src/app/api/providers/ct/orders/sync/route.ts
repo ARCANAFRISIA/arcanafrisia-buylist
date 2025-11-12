@@ -218,46 +218,55 @@ if (to)   qs.set("to", to);
             const ts = (order.paidAt ?? order.sentAt ?? (li.created_at ? new Date(li.created_at) : new Date()));
             const externalId = `${order.ctOrderId}#${ctLineId}`;
 
-            await prisma.salesLog.upsert({
-              where: { source_externalId: { source: "CT", externalId } },
-              update: {
-                ts,
-                ctOrderId: order.ctOrderId,
-                blueprintId: line.blueprintId ?? null,
-                cardmarketId: line.cardmarketId ?? null,
-                scryfallId: line.scryfallId ?? null,
-                isFoil: line.isFoil,
-                condition: line.condition ?? null,
-                qty,
-                unitPriceEur: unit,
-                lineTotalEur: gross,
-                feeEur: feeAlloc,
-                shippingEur: shipAlloc,
-                comment: commentRaw ?? undefined,
-                sourceCode: sourceCode ?? undefined,
-                sourceDate: sourceDate ?? undefined,
-              },
-              create: {
-                source: "CT",
-                externalId,
-                orderId: order.id,
-                ctOrderId: order.ctOrderId,
-                ts,
-                blueprintId: line.blueprintId ?? null,
-                cardmarketId: line.cardmarketId ?? null,
-                scryfallId: line.scryfallId ?? null,
-                isFoil: line.isFoil,
-                condition: line.condition ?? null,
-                qty,
-                unitPriceEur: unit,
-                lineTotalEur: gross,
-                feeEur: feeAlloc,
-                shippingEur: shipAlloc,
-                comment: commentRaw ?? undefined,
-                sourceCode: sourceCode ?? undefined,
-                sourceDate: sourceDate ?? undefined,
-              }
-            });
+            // ✅ DEDUPE PRIMAIR OP (source, ctLineId), FALLBACK (source, externalId)
+await prisma.salesLog.upsert({
+  where: (ctLineId != null && Number.isFinite(Number(ctLineId)))
+    ? { source_ctLineId: { source: "CT", ctLineId: Number(ctLineId) } }
+    : { source_externalId: { source: "CT", externalId } },
+
+  // ⚠️ identifiers en historie niet overschrijven; alleen velden die legitiem kunnen wijzigen
+  update: {
+    ts,
+    // ctOrderId, externalId en ctLineId blijven zoals bij create (niet muteren)
+    blueprintId: line.blueprintId ?? null,
+    cardmarketId: line.cardmarketId ?? null,
+    scryfallId: line.scryfallId ?? null,
+    isFoil: line.isFoil,
+    condition: line.condition ?? null,
+    qty,
+    unitPriceEur: unit,
+    lineTotalEur: gross,
+    feeEur: feeAlloc,
+    shippingEur: shipAlloc,
+    comment: commentRaw ?? undefined,
+    sourceCode: sourceCode ?? undefined,
+    sourceDate: sourceDate ?? undefined,
+  },
+
+  create: {
+    source: "CT",
+    externalId,                     // bv. "25517787#74676791"
+    ctOrderId: order.ctOrderId,     // is al BigInt via select
+    ctLineId: Number(ctLineId),     // 🔑 nieuw veld voor dedupe
+    orderId: order.id,
+
+    ts,
+    blueprintId: line.blueprintId ?? null,
+    cardmarketId: line.cardmarketId ?? null,
+    scryfallId: line.scryfallId ?? null,
+    isFoil: line.isFoil,
+    condition: line.condition ?? null,
+    qty,
+    unitPriceEur: unit,
+    lineTotalEur: gross,
+    feeEur: feeAlloc,
+    shippingEur: shipAlloc,
+    comment: commentRaw ?? undefined,
+    sourceCode: sourceCode ?? undefined,
+    sourceDate: sourceDate ?? undefined,
+  }
+});
+
 
             salesUpserts++;
           }

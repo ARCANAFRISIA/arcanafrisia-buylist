@@ -224,6 +224,7 @@ model SalesLog {
   externalId         String
   orderId            Int
   ctOrderId          Int?
+  ctLineId           BigInt?
   ts                 DateTime
   blueprintId        Int?
   cardmarketId       Int?
@@ -244,6 +245,7 @@ model SalesLog {
   inventoryAppliedAt DateTime?
 
   @@unique([source, externalId], name: "source_externalId")
+  @@unique([source, ctLineId], map: "saleslog_source_ctlineid_unique")
 }
 
 model CMOrder {
