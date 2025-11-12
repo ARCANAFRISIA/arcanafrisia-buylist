@@ -1,44 +1,49 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const maxDuration = 300;
 
 function baseUrl() {
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL;
+  if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL!;
   return "http://localhost:3000";
 }
 
-export async function GET() {
+export async function GET(_req: NextRequest) {
   const base = baseUrl();
-  const bypass = process.env.VERCEL_PROTECTION_BYPASS || "";
 
-  // Kies je eigen parameters hier:
+  // build /api/ops/apply-sales URL with your defaults
   const u = new URL("/api/ops/apply-sales", base);
   u.searchParams.set("limit", "250");
-  // Tip: laat since via SyncCursor lopen; of zet 'm expliciet:
-  // u.searchParams.set("since", new Date(Date.now()-24*3600e3).toISOString());
-  u.searchParams.set("simulate", "0"); // "1" = droogdraaien
+  u.searchParams.set("simulate", "0");
+  // optionally: u.searchParams.set("since", new Date(Date.now() - 24*3600e3).toISOString());
 
   const res = await fetch(u.toString(), {
-    method: "POST",                              // ⬅️ intern POST’en
+    method: "POST", // ops is POST-only
     headers: {
-      "x-vercel-cron": "1",                     // ⬅️ jouw auth-bypass
-      "accept": "application/json",
+      accept: "application/json",
+      "content-type": "application/json",
       "user-agent": "vercel-cron/1.0 (+https://vercel.com/docs/cron-jobs)",
-      ...(bypass ? { "x-vercel-protection-bypass": bypass } : {}),
+      "x-vercel-cron": "1",
+      // >>> IMPORTANT: pass the same token ops expects <<<
+      ...(process.env.ADMIN_TOKEN ? { "x-admin-token": process.env.ADMIN_TOKEN } : {}),
+      ...(process.env.VERCEL_PROTECTION_BYPASS
+        ? { "x-vercel-protection-bypass": process.env.VERCEL_PROTECTION_BYPASS }
+        : {}),
     },
+    body: JSON.stringify({}), // tolerate handlers expecting JSON
     cache: "no-store",
   });
 
-  let body: any = null;
-  try {
-    const text = await res.text();
-    try { body = JSON.parse(text); } catch { body = { raw: text }; }
-  } catch {}
+  const text = await res.text();
+  let payload: any;
+  try { payload = JSON.parse(text); } catch { payload = { raw: text }; }
 
+  // bubble up inner status so logs show 401/400 clearly
   return NextResponse.json(
-    { ok: res.ok, status: res.status, route: "apply-sales", base, result: body },
-    { status: res.ok ? 200 : res.status, headers: { "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate" } }
+    { ok: res.ok, status: res.status, proxy: "/api/ops/apply-sales", result: payload },
+    { status: res.ok ? 200 : res.status }
   );
 }
