@@ -39,12 +39,12 @@ function checkBasicAuth(req: NextRequest) {
   }
 }
 
-export function middleware(req) {
+export function middleware(req: NextRequest) {
   const p = req.nextUrl.pathname;
-  if (p.startsWith('/api/cron')) return NextResponse.next(); // allow cron
-  return NextResponse.next(); 
-}
 
+  if (isCron(req)) {
+  return NextResponse.next();
+}
 
   // 🔓 BYPASS CM provider endpoints (no auth)
   if (
