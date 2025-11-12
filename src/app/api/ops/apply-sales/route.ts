@@ -107,17 +107,23 @@ export async function POST(req: NextRequest) {
 
     // ---- since bepalen ----
     let since: Date | null = null;
-    if (sinceParam) {
-      const d = new Date(sinceParam);
-      if (!isNaN(d.getTime())) since = d;
-    }
-    if (!since) {
-      const cursor = await prisma.syncCursor.findUnique({ where: { key: "sales.apply.since" } });
-      if (cursor?.value) {
-        const d = new Date(cursor.value);
-        if (!isNaN(d.getTime())) since = d;
-      }
-    }
+
+// 1) querystring
+if (sinceParam) {
+  const d = new Date(sinceParam);
+  if (!isNaN(d.getTime())) since = d;
+}
+
+// 2) cursor fallback
+if (!since) {
+  const cursor = await prisma.syncCursor.findUnique({
+    where: { key: "sales.apply.since" },
+  });
+  if (cursor?.value) {
+    const d = new Date(cursor.value);
+    if (!isNaN(d.getTime())) since = d;
+  }
+}
     const hasExplicitSelection =
   !!onlyCtOrderId || !!idsParam; // gericht selecteren
 
