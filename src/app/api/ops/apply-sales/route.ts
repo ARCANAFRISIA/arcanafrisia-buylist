@@ -325,11 +325,13 @@ if (simulate) {
         errors.push({ salesLogId: s.id, message: String(e?.message || e) });
       }
     }
+// Zorg dat since altijd een geldige ISO-string is voor de response
+const sinceIso = (since ?? new Date(0)).toISOString();
 
     return NextResponse.json({
       ok: true,
       simulate,
-      since: since.toISOString(),
+      since: sinceIso,
       salesFound: sales.length,
       processed,
       wouldConsume: simulate ? wouldConsume : undefined,
