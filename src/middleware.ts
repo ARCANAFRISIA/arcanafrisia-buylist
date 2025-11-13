@@ -42,9 +42,14 @@ function checkBasicAuth(req: NextRequest) {
 export function middleware(req: NextRequest) {
   const p = req.nextUrl.pathname;
 
-  if (isCron(req)) {
-  return NextResponse.next();
-}
+  // 1) Cron routes: altijd doorlaten
+  if (p.startsWith("/api/cron")) {
+    return NextResponse.next();
+  }
+
+  if (p === "/api/ops/apply-sales" && req.headers.get("x-vercel-cron") === "1") {
+    return NextResponse.next();
+  }
 
   // 🔓 BYPASS CM provider endpoints (no auth)
   if (
@@ -61,5 +66,14 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin", "/admin/:path*", "/api/submissions/:path*"],
+  matcher: [
+    
+    "/admin",
+    "/admin/:path*",
+    "/api/submissions/:path*",
+
+   
+    "/((?!_next|.*\\.(?:png|jpg|jpeg|svg|ico|css|js|map)$).*)"
+  ],
 };
+

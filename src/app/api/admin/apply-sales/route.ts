@@ -1,4 +1,3 @@
-// src/app/api/cron/apply-sales/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -12,35 +11,35 @@ function baseUrl() {
   return "http://localhost:3000";
 }
 
-export async function GET(_req: NextRequest) {
+async function run(req: NextRequest) {
   const base = baseUrl();
+  const urlIn = new URL(req.url);
+
   const u = new URL("/api/ops/apply-sales", base);
-  u.searchParams.set("limit", "250");
-  u.searchParams.set("simulate", "0");
+  if (urlIn.searchParams.get("limit"))    u.searchParams.set("limit", urlIn.searchParams.get("limit")!);
+  if (urlIn.searchParams.get("simulate")) u.searchParams.set("simulate", urlIn.searchParams.get("simulate")!);
+  if (urlIn.searchParams.get("since"))    u.searchParams.set("since", urlIn.searchParams.get("since")!);
 
   const res = await fetch(u.toString(), {
     method: "POST",
     headers: {
-      accept: "application/json",
+      "accept": "application/json",
       "content-type": "application/json",
-      "user-agent": "vercel-cron/1.0 (+https://vercel.com/docs/cron-jobs)",
-      "x-vercel-cron": "1",
-      // pass the server-side token
+      // server-side admin token
       ...(process.env.ADMIN_TOKEN ? { "x-admin-token": process.env.ADMIN_TOKEN } : {}),
-      ...(process.env.VERCEL_PROTECTION_BYPASS
-        ? { "x-vercel-protection-bypass": process.env.VERCEL_PROTECTION_BYPASS }
-        : {}),
     },
-    body: JSON.stringify({}), // tolerate JSON body requirement
+    body: JSON.stringify({}),
     cache: "no-store",
   });
 
   const text = await res.text();
-  let payload: any;
-  try { payload = JSON.parse(text); } catch { payload = { raw: text }; }
+  let payload: any; try { payload = JSON.parse(text); } catch { payload = { raw: text }; }
 
   return NextResponse.json(
     { ok: res.ok, status: res.status, proxy: "/api/ops/apply-sales", result: payload },
     { status: res.ok ? 200 : res.status }
   );
 }
+
+export async function GET(req: NextRequest)  { return run(req); }
+export async function POST(req: NextRequest) { return run(req); }
