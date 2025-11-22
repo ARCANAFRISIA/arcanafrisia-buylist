@@ -12,7 +12,7 @@ type StockInRow = {
   unitCostEur: number;
   sourceCode?: string | null;
   sourceDate?: string | null;
-  language?: string | null;   // ✅ ipv location
+  language?: string | null;   
 };
 
 // heel simpele CSV parser: split op newline + comma/semicolon
@@ -80,18 +80,20 @@ export async function POST(req: NextRequest) {
     const idxUnitCost = idx("unitcosteur");
     const idxSourceCode = idx("sourcecode");
     const idxSourceDate = idx("sourcedate");
-    const idxLanguage = idx("language");      // ✅ ipv location
+    const idxLanguage = idx("language");      
 
-    const required = [
-      ["cardmarketId", idxCardmarketId],
-      ["isFoil", idxIsFoil],
-      ["condition", idxCondition],
-      ["qty", idxQty],
-      ["unitCostEur", idxUnitCost],
-    ];
-    const missingRequired = required
-      .filter(([, i]) => i < 0)
-      .map(([name]) => name);
+   const required: Array<{ name: string; idx: number }> = [
+  { name: "cardmarketId", idx: idxCardmarketId },
+  { name: "isFoil", idx: idxIsFoil },
+  { name: "condition", idx: idxCondition },
+  { name: "qty", idx: idxQty },
+  { name: "unitCostEur", idx: idxUnitCost },
+];
+
+const missingRequired = required
+  .filter((r) => r.idx < 0)
+  .map((r) => r.name);
+
     if (missingRequired.length) {
       return NextResponse.json(
         {
@@ -148,7 +150,7 @@ export async function POST(req: NextRequest) {
       const sourceCode =
         (idxSourceCode >= 0 ? cols[idxSourceCode] : "") ||
         defaultSourceCode ||
-        null;
+        "UNKNOWN";
 
       const sourceDateStr =
         (idxSourceDate >= 0 ? cols[idxSourceDate] : "") ||
@@ -196,7 +198,7 @@ export async function POST(req: NextRequest) {
           qtyIn: row.qty,
           qtyRemaining: row.qty,
           avgUnitCostEur: row.unitCostEur,
-          sourceCode: row.sourceCode,
+          sourceCode: row.sourceCode ?? "UNKNOWN",
           sourceDate: when,
         },
       });
