@@ -4,9 +4,11 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
+
 function baseUrl() {
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL;
+  if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL!;
   return "http://localhost:3000";
 }
 
@@ -14,14 +16,17 @@ async function hit(base: string, path: string, withBypass = false) {
   const bypass = process.env.VERCEL_PROTECTION_BYPASS || "";
   const url = new URL(path, base);
 
+  const commonHeaders: Record<string, string> = {
+    "x-vercel-cron": "1",
+    accept: "application/json",
+    "user-agent": "vercel-cron/1.0 (+https://vercel.com/docs/cron-jobs)",
+    ...(ADMIN_TOKEN ? { "x-admin-token": ADMIN_TOKEN } : {}),
+    ...(withBypass && bypass ? { "x-vercel-protection-bypass": bypass } : {}),
+  };
+
   let res = await fetch(url.toString(), {
     method: "GET",
-    headers: {
-      "x-vercel-cron": "1",
-      "accept": "application/json",
-      "user-agent": "vercel-cron/1.0 (+https://vercel.com/docs/cron-jobs)",
-      ...(withBypass && bypass ? { "x-vercel-protection-bypass": bypass } : {}),
-    },
+    headers: commonHeaders,
     cache: "no-store",
     next: { revalidate: 0 },
   });
@@ -32,13 +37,16 @@ async function hit(base: string, path: string, withBypass = false) {
     u2.searchParams.set("x-vercel-set-bypass-cookie", "true");
     if (bypass) u2.searchParams.set("x-vercel-protection-bypass", bypass);
 
+    const fallbackHeaders: Record<string, string> = {
+      "x-vercel-cron": "1",
+      accept: "application/json",
+      "user-agent": "vercel-cron/1.0 (+https://vercel.com/docs/cron-jobs)",
+      ...(ADMIN_TOKEN ? { "x-admin-token": ADMIN_TOKEN } : {}),
+    };
+
     res = await fetch(u2.toString(), {
       method: "GET",
-      headers: {
-        "x-vercel-cron": "1",
-        "accept": "application/json",
-        "user-agent": "vercel-cron/1.0 (+https://vercel.com/docs/cron-jobs)",
-      },
+      headers: fallbackHeaders,
       cache: "no-store",
       next: { revalidate: 0 },
     });
@@ -47,7 +55,11 @@ async function hit(base: string, path: string, withBypass = false) {
   let body: any = null;
   try {
     const text = await res.text();
-    try { body = JSON.parse(text); } catch { body = { raw: text }; }
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = { raw: text };
+    }
   } catch (e: any) {
     body = { parseError: String(e) };
   }
@@ -62,7 +74,6 @@ export async function GET() {
     `/api/providers/cm/orders/sync?actor=seller&state=bought&start=1&step=100&maxBatches=2`,
     `/api/providers/cm/orders/sync?actor=seller&state=paid&start=1&step=100&maxBatches=2`,
     `/api/providers/cm/orders/sync?actor=seller&state=sent&start=1&step=100&maxBatches=2`,
-    
   ];
 
   const results: Record<string, any> = {};
