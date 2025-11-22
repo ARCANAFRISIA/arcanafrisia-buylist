@@ -13,6 +13,7 @@ type SnapshotRow = {
   condition: string;
   qtyOnHand?: string | number;
   avgUnitCostEur?: string | number;
+  language?: string | null;
 };
 
 type LotRow = {
@@ -55,6 +56,7 @@ export async function POST(req: NextRequest) {
           cardmarketId: Number((r as any).cardmarketId),
           isFoil: toBool((r as any).isFoil),
           condition: String((r as any).condition || "").toUpperCase(),
+          language: String((r as any).language || "EN").toUpperCase(),
         };
         if (!Number.isFinite(key.cardmarketId) || !key.condition) continue;
 
@@ -62,7 +64,8 @@ export async function POST(req: NextRequest) {
         const avg = (r as any).avgUnitCostEur;
 
         await prisma.inventoryBalance.upsert({
-          where: { cardmarketId_isFoil_condition: key },
+          where: { cardmarketId_isFoil_condition_language: key },
+
           create: {
             ...key,
             qtyOnHand: Number.isFinite(qty) ? qty : 0,
@@ -85,6 +88,7 @@ export async function POST(req: NextRequest) {
       const cardmarketId = Number((r as any).cardmarketId);
       const isFoil = toBool((r as any).isFoil);
       const condition = String((r as any).condition || "").toUpperCase();
+      const language = String((r as any).language || "EN").toUpperCase();
       const qty = Number((r as any).qty ?? 0);
       const avg = (r as any).avgUnitCostEur;
       const location = (r as any).location || null;
@@ -122,18 +126,31 @@ export async function POST(req: NextRequest) {
       });
 
       await prisma.inventoryBalance.upsert({
-        where: { cardmarketId_isFoil_condition: { cardmarketId, isFoil, condition } },
-        create: {
-          cardmarketId,
-          isFoil,
-          condition,
-          qtyOnHand: Number.isFinite(qty) ? qty : 0,
-          avgUnitCostEur: avg != null && String(avg).length ? String(avg) : null,
-        },
-        update: {
-          qtyOnHand: { increment: Number.isFinite(qty) ? qty : 0 },
-        },
-      });
+  where: {
+    cardmarketId_isFoil_condition_language: {
+      cardmarketId,
+      isFoil,
+      condition,
+      language,
+    },
+  },
+  create: {
+    cardmarketId,
+    isFoil,
+    condition,
+    language,
+    qtyOnHand: Number.isFinite(qty) ? qty : 0,
+    avgUnitCostEur:
+      avg != null && String(avg).length ? String(avg) : null,
+  },
+  update: {
+    qtyOnHand: Number.isFinite(qty) ? qty : 0,
+    ...(avg != null && String(avg).length
+      ? { avgUnitCostEur: String(avg) }
+      : {}),
+  },
+});
+
 
       createdLots++;
     }
