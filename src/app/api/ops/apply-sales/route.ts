@@ -17,6 +17,7 @@ type SaleLike = {
   isFoil: boolean | null;
   condition: string | null;
   qty: number | null;
+  language?: string | null;
 };
 
 // --- helpers ---
@@ -32,28 +33,69 @@ const toBool = (b: any): boolean | null => {
 
 function normalizeCMCondition(raw: string): string {
   const s = raw.trim().toUpperCase().replace(/\s+/g, " ");
+
   const map: Record<string, string> = {
-    // CM set
-    "M": "MT", "MT": "MT", "MINT": "MT",
+    // --- Mint ---
+    "M": "MT",
+    "MT": "MT",
+    "MINT": "MT",
 
-    "NM": "NM", "NEAR MINT": "NM", "NEARMINT": "NM", "NEAR_MINT": "NM",
+    // --- Near Mint ---
+    "NM": "NM",
+    "NEAR MINT": "NM",
+    "NEARMINT": "NM",
+    "NEAR_MINT": "NM",
 
-    "EX": "EX", "EXCELLENT": "EX", "SLIGHTLY PLAYED": "EX",
-    "SLIGHTLY-PLAYED": "EX", "SP": "EX",
+    // --- Slightly Played -> EX ---
+    "EX": "EX",
+    "EXCELLENT": "EX",
+    "SLIGHTLY PLAYED": "EX",
+    "SLIGHTLY-PLAYED": "EX",
+    "SP": "EX",
 
-    "GD": "GD", "GOOD": "GD", "Moderately Played": "GD",
-    "Moderately-Played": "GD", "MP": "GD", "MODERATELY PLAYED": "GD",
+    // --- Moderately Played -> GD ---
+    "GD": "GD",
+    "GOOD": "GD",
+    "MODERATELY PLAYED": "GD",
+    "MODERATELY-PLAYED": "GD",
+    "MODERATELY": "GD",
+    "MP": "GD",
 
-    "LP": "LP", "LIGHT PLAYED": "LP", "LIGHTLY PLAYED": "LP", "LIGHT-PLAYED": "LP",
+    // --- Light Played -> LP ---
+    "LP": "LP",
+    "LIGHT PLAYED": "LP",
+    "LIGHTLY PLAYED": "LP",
+    "LIGHT-PLAYED": "LP",
 
-    "PL": "PL", "PLAYED": "PL",
+    // --- Played (CT) -> LP ---
+    "PLAYED": "LP",
 
-    "PO": "PO", "P": "PO", "POOR": "PO",
+    // --- Heavily Played / Poor -> PL/PO (kies PL als werkcanon) ---
+    "PL": "PL",
+    "HEAVILY PLAYED": "PL",
+    "HEAVILY-PLAYED": "PL",
+
+    "PO": "PO",
+    "P": "PO",
+    "POOR": "PO",
   };
-  return map[s] ?? s; // als onbekend, laat omhoog gecapte string staan
+
+  return map[s] ?? s; // onbekend = uppercase string teruggeven
 }
 
 
+function normalizeLanguage(raw: any): string {
+  const s = (raw ?? "").toString().trim().toUpperCase();
+  if (!s) return "EN";
+
+  if (["EN", "ENG", "ENGLISH"].includes(s)) return "EN";
+  if (["JA", "JP", "JPN", "JAPANESE"].includes(s)) return "JA";
+  if (["DE", "GER", "GERMAN"].includes(s)) return "DE";
+  // breid later uit als je meer talen actief gaat gebruiken
+
+  // Onbekend maar wel ingevuld? Laat 'm dan als uppercase.
+  return s;
+}
 
 
 function validateCM(s: SaleLike) {
@@ -63,6 +105,7 @@ function validateCM(s: SaleLike) {
   const foil = toBool(s.isFoil);
   const cond = normalizeCMCondition((s.condition ?? "").toString()); // ⬅️ hier
   const qty  = s.qty;
+  const lang = normalizeLanguage((s as any).language);
 
   if (cmid == null || !Number.isInteger(cmid)) missing.push("cardmarketId");
   if (foil == null) missing.push("isFoil");
@@ -76,6 +119,7 @@ function validateCM(s: SaleLike) {
       isFoil: foil ?? false,
       condition: cond,                       // ⬅️ genormaliseerd
       qty: Number(qty ?? 0),
+       language: lang,
       when: (s as any).ts ?? s.createdAt ?? new Date(),
     },
     missing,
@@ -166,7 +210,7 @@ if (idsParam) {
 
     // één sale verwerken (real run)
     async function applyOneSale(s: SaleLike, norm: ReturnType<typeof validateCM>["normalized"]) {
-      const { cardmarketId, isFoil, condition, qty, when } = norm;
+      const { cardmarketId, isFoil, condition, qty, when, language } = norm;
 
       await prisma.$transaction(async (tx) => {
         // 1) FIFO uit lots
@@ -176,6 +220,7 @@ if (idsParam) {
     cardmarketId,
     isFoil,
     condition,
+    language,
     qtyRemaining: { gt: 0 },
     sourceDate: { lte: when },        // ⬅️ verbruik geen voorraad na de sale-tijd
   },
@@ -198,6 +243,7 @@ if (idsParam) {
                 cardmarketId,
                 isFoil,
                 condition,
+                language,
                 qty: -consume,
                 unitCostEur: null,
                 refSource: s.source ?? null,
@@ -210,7 +256,7 @@ if (idsParam) {
 
         // 2) Balance afboeken — handmatig upsert om type-mismatch te vermijden
 const existing = await tx.inventoryBalance.findFirst({
-  where: { cardmarketId, isFoil, condition },
+  where: { cardmarketId, isFoil, condition, language },
 });
 
 if (existing) {
@@ -227,6 +273,7 @@ if (existing) {
       cardmarketId,
       isFoil,
       condition,
+      language,
       qtyOnHand: -qty,
       avgUnitCostEur: null,
       lastSaleAt: when,
@@ -260,13 +307,14 @@ if (existing) {
       // ---- SIMULATE: kijk eerst naar Balance; zo niet, val terug op Lots (met cutoff op sale.ts) ----
 if (simulate) {
   const cutoff = v.normalized.when; // verbruik geen voorraad die na de sale is binnengekomen
-
+  
   // 1) Balance
   const bal = await prisma.inventoryBalance.findFirst({
     where: {
       cardmarketId: v.normalized.cardmarketId,
       isFoil: v.normalized.isFoil,
       condition: v.normalized.condition,
+      language: v.normalized.language
     },
     select: { qtyOnHand: true },
   });
@@ -281,6 +329,7 @@ if (simulate) {
         cardmarketId: v.normalized.cardmarketId,
         isFoil: v.normalized.isFoil,
         condition: v.normalized.condition,
+        language: v.normalized.language,
         qtyRemaining: { gt: 0 },
         ...(cutoff ? { sourceDate: { lte: cutoff } } : {}), // cutoff is belangrijk
       },
@@ -294,6 +343,7 @@ if (simulate) {
       cardmarketId: v.normalized.cardmarketId,
       isFoil: v.normalized.isFoil,
       condition: v.normalized.condition,
+      language: v.normalized.language,
       qty: Math.min(v.normalized.qty, avail),
     });
   } else {
@@ -305,6 +355,7 @@ if (simulate) {
           cardmarketId: v.normalized.cardmarketId,
           isFoil: v.normalized.isFoil,
           condition: v.normalized.condition,
+          language: v.normalized.language,
         },
         qtyRequested: v.normalized.qty,
         // voor diagnose:

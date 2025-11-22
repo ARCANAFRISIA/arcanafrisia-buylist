@@ -6,6 +6,7 @@ type Row = {
   cardmarketId: string;
   foil: string;
   cond: string;
+  language: string;   
   addQty: string;
   price: string;
   policy: string;
@@ -36,7 +37,7 @@ export default function PostSalesPage() {
     const lines = csv.trim().split('\n');
     if (lines.length <= 1) return [];
     // verwacht header:
-    // cardmarketId,foil,cond,addQty,price,policy,sourceCode
+    // cardmarketId,isFoil,condition,language,addQty,priceEur,policyName,sourceCode
     return lines.slice(1).map((line) => {
       // simpele CSV split – jouw server zet quotes als nodig
       const parts = line.split(',');
@@ -44,10 +45,11 @@ export default function PostSalesPage() {
         cardmarketId: parts[0] ?? '',
         foil: parts[1] ?? '',
         cond: parts[2] ?? '',
-        addQty: parts[3] ?? '',
-        price: parts[4] ?? '',
-        policy: parts[5] ?? '',
-        sourceCode: parts[6] ?? '',
+        language: parts[3] ?? '',   
+        addQty: parts[4] ?? '',
+        price: parts[5] ?? '',
+        policy: parts[6] ?? '',
+        sourceCode: parts[7] ?? '',
       };
     });
   };
@@ -56,7 +58,7 @@ export default function PostSalesPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(buildUrl(true), { method: 'GET' });
+      const res = await fetch(buildUrl(noCursor), { method: 'GET' });
       if (!res.ok) throw new Error(`Preview failed: ${res.status}`);
       const csv = await res.text();
       setRows(parseCsv(csv));
@@ -160,22 +162,25 @@ export default function PostSalesPage() {
         <div className="overflow-x-auto border rounded-xl">
           <table className="w-full text-sm">
             <thead className="bg-black/30">
-              <tr>
-                <th className="text-left p-2">cardmarketId</th>
-                <th className="text-left p-2">foil</th>
-                <th className="text-left p-2">cond</th>
-                <th className="text-left p-2">addQty</th>
-                <th className="text-left p-2">price</th>
-                <th className="text-left p-2">policy</th>
-                <th className="text-left p-2">sourceCode</th>
-              </tr>
-            </thead>
+  <tr>
+    <th className="text-left p-2">cardmarketId</th>
+    <th className="text-left p-2">foil</th>
+    <th className="text-left p-2">cond</th>
+    <th className="text-left p-2">language</th>
+    <th className="text-left p-2">addQty</th>
+    <th className="text-left p-2">price</th>
+    <th className="text-left p-2">policy</th>
+    <th className="text-left p-2">sourceCode</th>
+  </tr>
+</thead>
+
             <tbody>
               {rows.map((r, i) => (
                 <tr key={i} className="odd:bg-black/10">
                   <td className="p-2">{r.cardmarketId}</td>
                   <td className="p-2">{r.foil}</td>
                   <td className="p-2">{r.cond}</td>
+                  <td className="p-2">{r.language}</td>   
                   <td className="p-2">{r.addQty}</td>
                   <td className="p-2">{r.price}</td>
                   <td className="p-2">{r.policy}</td>

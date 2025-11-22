@@ -9,8 +9,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <Link href="/admin">Dashboard</Link>
           <div className="mt-2 font-semibold">Tools</div>
           <Link href="/admin/tools/apply-sales">Apply Sales</Link>
-          <Link href="/admin/exports/post-sales">Post-Sales Export</Link>
+          <Link href="/admin/exports/post-sales">Relist & New Stock Export</Link>
           <Link href="/admin/exports/idle">Idle Export</Link>
+          <Link href="/admin/inventory" className="block hover:text-blue-400">
+            Inventory overview</Link>
+          <Link href="/admin/stock-in">Stock in</Link>  
           {/* voeg later meer items toe */}
         </nav>
       </aside>

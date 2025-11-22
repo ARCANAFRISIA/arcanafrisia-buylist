@@ -19,7 +19,6 @@ function csvEscape(s: string | number | boolean | null | undefined) {
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-const normalize = url.searchParams.get("normalize") === "1";
 const channel = (url.searchParams.get("channel") || "CM").toUpperCase();
 const mode = (url.searchParams.get("mode") || "relist").toLowerCase(); // "relist" | "newstock"
 const markupPct = Number(url.searchParams.get("markupPct") || "0.05"); // 5% default
@@ -27,7 +26,10 @@ const markupPct = Number(url.searchParams.get("markupPct") || "0.05"); // 5% def
 // ---- noCursor + since/cursor handling ----
 const noCursor = url.searchParams.get("noCursor") === "1";
 const sinceParam = url.searchParams.get("since");
-const cursorKey = "postsales.lastExportAt";
+const cursorKey =
+  mode === "relist"
+    ? "postsales.lastExportAt"
+    : "newstock.lastExportAt";
 const cursor = await prisma.syncCursor.findUnique({ where: { key: cursorKey } });
 
 const effectiveSince =
@@ -36,24 +38,32 @@ const effectiveSince =
   : new Date(Date.now() - 24 * 60 * 60 * 1000); // fallback 24h
 
 
-  async function lastSoldUnitPrice(cmid: number, isFoil: boolean, condition: string, sinceDate: Date) {
+  async function lastSoldUnitPrice(
+  cmid: number,
+  isFoil: boolean,
+  condition: string,
+  language: string,
+  sinceDate: Date
+) {
   const row = await prisma.salesLog.findFirst({
     where: {
       cardmarketId: cmid,
       isFoil,
       condition,
+      language, // ✅ zelfde taal
       inventoryAppliedAt: { not: null },
       ts: { gte: sinceDate },
-
     },
     select: { unitPriceEur: true, lineTotalEur: true, qty: true, ts: true },
     orderBy: { ts: "desc" },
   });
   if (!row) return null;
   if (row.unitPriceEur != null) return Number(row.unitPriceEur);
-  if (row.lineTotalEur != null && row.qty) return Number(row.lineTotalEur) / Math.abs(Number(row.qty));
+  if (row.lineTotalEur != null && row.qty)
+    return Number(row.lineTotalEur) / Math.abs(Number(row.qty));
   return null;
 }
+
 
 
   // Policy ophalen
@@ -72,6 +82,7 @@ const effectiveSince =
       cardmarketId: true,
       isFoil: true,
       condition: true,
+      language: true,
       qtyOnHand: true,
     },
   });
@@ -83,54 +94,94 @@ const soldMap = new Map<string, number>();
     cardmarketId: number;
     isFoil: boolean;
     condition: string;
+    language: string;
     sum: number;
   };
 
-  let rows: SoldAggRow[];
-
-  if (!normalize) {
-    // Huidig gedrag (geen mapping)
-    rows = await prisma.$queryRaw<SoldAggRow[]>`
-      SELECT "cardmarketId", "isFoil", "condition", COALESCE(SUM(qty),0) AS sum
-      FROM "SalesLog"
-      WHERE "inventoryAppliedAt" IS NOT NULL
-        AND ts >= ${effectiveSince}
-      GROUP BY 1,2,3
-    `;
-  } else {
-    // CT → ArcanaFrisia canon:
-    // Near Mint→NM, Slightly Played→EX, Moderately Played→GD, Played→LP, Heavily Played→PL
-    rows = await prisma.$queryRawUnsafe<SoldAggRow[]>(`
-      SELECT
-        "cardmarketId",
-        COALESCE("isFoil", false) AS "isFoil",
-        CASE
-          WHEN "condition" IS NULL                 THEN 'NM'
-          WHEN "condition" ILIKE 'Near Mint'       THEN 'NM'
-          WHEN "condition" ILIKE 'Slightly Played' THEN 'EX'
-          WHEN "condition" ILIKE 'Moderately Played' THEN 'GD'
-          WHEN "condition" ILIKE 'Played'          THEN 'LP'
-          WHEN "condition" ILIKE 'Heavily Played'  THEN 'PL'
-          WHEN "condition" ILIKE 'NM'              THEN 'NM'
-          WHEN "condition" ILIKE 'EX'              THEN 'EX'
-          WHEN "condition" ILIKE 'GD'              THEN 'GD'
-          WHEN "condition" ILIKE 'LP'              THEN 'LP'
-          WHEN "condition" ILIKE 'PL'              THEN 'PL'
-          ELSE UPPER("condition")
-        END AS "condition",
-        COALESCE(SUM(qty),0) AS sum
-      FROM "SalesLog"
-      WHERE "inventoryAppliedAt" IS NOT NULL
-        AND ts >= $1
-      GROUP BY 1,2,3
-    `, effectiveSince as any);
-  }
+  // Altijd condities + language normaliseren
+  const rows = await prisma.$queryRawUnsafe<SoldAggRow[]>(`
+    SELECT
+      "cardmarketId",
+      COALESCE("isFoil", false) AS "isFoil",
+      CASE
+        WHEN "condition" IS NULL                     THEN 'NM'
+        WHEN "condition" ILIKE 'Near Mint'           THEN 'NM'
+        WHEN "condition" ILIKE 'Slightly Played'     THEN 'EX'
+        WHEN "condition" ILIKE 'Moderately Played'   THEN 'GD'
+        WHEN "condition" ILIKE 'Played'              THEN 'LP'
+        WHEN "condition" ILIKE 'Heavily Played'      THEN 'PL'
+        WHEN "condition" ILIKE 'NM'                  THEN 'NM'
+        WHEN "condition" ILIKE 'EX'                  THEN 'EX'
+        WHEN "condition" ILIKE 'GD'                  THEN 'GD'
+        WHEN "condition" ILIKE 'LP'                  THEN 'LP'
+        WHEN "condition" ILIKE 'PL'                  THEN 'PL'
+        ELSE UPPER("condition")
+      END AS "condition",
+      CASE
+        WHEN "language" IS NULL OR "language" = ''  THEN 'EN'
+        ELSE UPPER("language")
+      END AS "language",
+      COALESCE(SUM(qty),0) AS sum
+    FROM "SalesLog"
+    WHERE "inventoryAppliedAt" IS NOT NULL
+      AND ts >= $1
+    GROUP BY 1,2,3,4
+  `, effectiveSince as any);
 
   for (const r of rows) {
-    const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}`;
+    const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}|${r.language}`;
     soldMap.set(key, Math.abs(Number(r.sum || 0)));
   }
 }
+
+
+  // Nieuwe voorraad (lots) sinds 'since' – voor mode=newstock
+const newStockMap = new Map<string, number>();
+{
+  type NewStockAggRow = {
+    cardmarketId: number;
+    isFoil: boolean;
+    condition: string;
+    language: string;
+    sum: number;
+  };
+
+  const rows = await prisma.$queryRawUnsafe<NewStockAggRow[]>(`
+    SELECT
+      "cardmarketId",
+      COALESCE("isFoil", false) AS "isFoil",
+      CASE
+        WHEN "condition" IS NULL                     THEN 'NM'
+        WHEN "condition" ILIKE 'Near Mint'           THEN 'NM'
+        WHEN "condition" ILIKE 'Slightly Played'     THEN 'EX'
+        WHEN "condition" ILIKE 'Moderately Played'   THEN 'GD'
+        WHEN "condition" ILIKE 'Played'              THEN 'LP'
+        WHEN "condition" ILIKE 'Heavily Played'      THEN 'PL'
+        WHEN "condition" ILIKE 'NM'                  THEN 'NM'
+        WHEN "condition" ILIKE 'EX'                  THEN 'EX'
+        WHEN "condition" ILIKE 'GD'                  THEN 'GD'
+        WHEN "condition" ILIKE 'LP'                  THEN 'LP'
+        WHEN "condition" ILIKE 'PL'                  THEN 'PL'
+        ELSE UPPER("condition")
+      END AS "condition",
+      CASE
+        WHEN "language" IS NULL OR "language" = ''  THEN 'EN'
+        ELSE UPPER("language")
+      END AS "language",
+      COALESCE(SUM("qtyRemaining"),0) AS sum
+    FROM "InventoryLot"
+    WHERE "sourceDate" >= $1
+      AND "qtyRemaining" > 0
+    GROUP BY 1,2,3,4
+  `, effectiveSince as any);
+
+  for (const r of rows) {
+    const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}|${r.language}`;
+    newStockMap.set(key, Math.abs(Number(r.sum || 0)));
+  }
+}
+
+
 
 
 
@@ -178,34 +229,56 @@ const soldMap = new Map<string, number>();
   }
 
   // Helper: haal FIFO bron (sourceCode) van eerste lot met voorraad
-  async function firstLotSourceCode(cmid: number, isFoil: boolean, condition: string) {
-    const lot = await prisma.inventoryLot.findFirst({
-      where: { cardmarketId: cmid, isFoil, condition, qtyRemaining: { gt: 0 } },
-      select: { sourceCode: true, sourceDate: true, createdAt: true },
-      orderBy: [{ sourceDate: "asc" }, { createdAt: "asc" }],
-    });
-    return lot?.sourceCode ?? null;
-  }
+  async function firstLotSourceCode(
+  cmid: number,
+  isFoil: boolean,
+  condition: string,
+  language: string
+) {
+  const lot = await prisma.inventoryLot.findFirst({
+    where: {
+      cardmarketId: cmid,
+      isFoil,
+      condition,
+      language,                    
+      qtyRemaining: { gt: 0 },
+    },
+    select: { sourceCode: true, sourceDate: true, createdAt: true },
+    orderBy: [{ sourceDate: "asc" }, { createdAt: "asc" }],
+  });
+  return lot?.sourceCode ?? null;
+}
+
 
   // Bouw CSV
-  const header = "cardmarketId,isFoil,condition,addQty,priceEur,policyName,sourceCode\n";
+  const header = "cardmarketId,isFoil,condition,language,addQty,priceEur,policyName,sourceCode\n";
+
   const lines: string[] = [header];
 
   let considered = 0, emitted = 0, skippedNoPrice = 0;
 
-  for (const b of balances) {
+    for (const b of balances) {
     considered++;
-    const key = `${b.cardmarketId}|${b.isFoil ? 1 : 0}|${b.condition}`;
+    const key = `${b.cardmarketId}|${b.isFoil ? 1 : 0}|${b.condition}|${b.language}`;
+
+
     const soldSinceUpdate = soldMap.get(key) || 0;
-    if (soldSinceUpdate <= 0 && b.qtyOnHand <= 0) continue; // niets te doen
+    const newStockSince   = newStockMap.get(key) || 0;
+
+    // Welke “activiteit” telt, hangt af van de mode:
+    const activity = mode === "relist" ? soldSinceUpdate : newStockSince;
+
+    // Niks verkocht / niks nieuw, en geen voorraad → skip
+    if (activity <= 0 && b.qtyOnHand <= 0) continue;
 
     // tier kiezen
     const tier = policy.tiers.find(t => b.qtyOnHand >= t.minOnHand) || null;
     const policyCap = tier?.listQty ?? 0;
 
-    // addQty = MAX(0, MIN(soldSinceUpdate, policyCap, onHand))
-    const addQty = Math.max(0, Math.min(soldSinceUpdate, policyCap, b.qtyOnHand));
+    // addQty = MAX(0, MIN(activity, policyCap, onHand))
+    const addQty = Math.max(0, Math.min(activity, policyCap, b.qtyOnHand));
     if (addQty <= 0) continue;
+
 
     // prijs: max(CT_min, CM_trend * 1.10), afronden 0.05
     const cmTrend = cmTrendMap.get(b.cardmarketId) ?? null;
@@ -214,7 +287,7 @@ const soldMap = new Map<string, number>();
     let price: number | null = null;
 
 if (mode === "relist") {
-  const last = await lastSoldUnitPrice(b.cardmarketId, b.isFoil, b.condition, effectiveSince);
+  const last = await lastSoldUnitPrice(b.cardmarketId, b.isFoil, b.condition, b.language, effectiveSince);
 
   if (last != null && last > 0) {
     price = last * (1 + (isFinite(markupPct) ? markupPct : 0.05));
@@ -230,11 +303,16 @@ if (mode === "relist") {
 } else { // mode === "newstock"
   const cmTrend = cmTrendMap.get(b.cardmarketId) ?? null;
   const ctMin   = ctMinMap.get(b.cardmarketId) ?? null;
+
   if (cmTrend != null || ctMin != null) {
     const base = Math.max(ctMin ?? 0, (cmTrend ?? 0) * 1.10);
     price = base;
+  } else {
+    // Fallback voor kaarten zonder marktprijs
+    price = 1000; // Signaalwaarde zodat je ze handmatig checkt
   }
 }
+
 
 // afronden
 if (price != null && price > 0) {
@@ -248,11 +326,12 @@ if (price != null && price > 0) {
       continue;
     }
 
-    const src = await firstLotSourceCode(b.cardmarketId, b.isFoil, b.condition);
+    const src = await firstLotSourceCode(b.cardmarketId, b.isFoil, b.condition, b.language);
     const row = [
       csvEscape(b.cardmarketId),
       csvEscape(b.isFoil),
       csvEscape(b.condition),
+      csvEscape(b.language),
       csvEscape(addQty),
       csvEscape(price.toFixed(2)),
       csvEscape(policy.name),

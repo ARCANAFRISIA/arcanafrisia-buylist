@@ -35,6 +35,37 @@ const CT_TOKEN = process.env.CT_TOKEN;
 
 const centsToEur = (c?: number | null) => c == null ? null : Number((c / 100).toFixed(2));
 
+function normalizeCTLanguage(raw?: string | null): string {
+  if (!raw) return "EN"; // default
+
+  const s = raw.trim().toUpperCase();
+
+  const map: Record<string, string> = {
+    "EN": "EN",
+    "ENGLISH": "EN",
+    "DE": "DE",
+    "GERMAN": "DE",
+    "FR": "FR",
+    "FRENCH": "FR",
+    "ES": "ES",
+    "SPANISH": "ES",
+    "IT": "IT",
+    "ITALIAN": "IT",
+    "PT": "PT",
+    "PORTUGUESE": "PT",
+    "JA": "JA",
+    "JP": "JA",
+    "JAPANESE": "JA",
+    "ZH": "ZHS",            // evt. splitten als CT dat doet
+    "CHINESE": "ZHS",
+  };
+
+  if (map[s]) return map[s];
+
+  // fallback: eerste 2 letters, bv "ENGLISH (EU)" → "EN"
+  return s.slice(0, 2);
+}
+
 // --- TERUG naar jouw simpele fetch; geen extra headers, geen andere params ---
 async function ctFetch(path: string) {
   if (!CT_TOKEN) throw new Error("CT_TOKEN missing");
@@ -177,6 +208,13 @@ if (to)   qs.set("to", to);
             const commentRaw: string | null = li.description ?? null;
             const { code: sourceCode, date: sourceDate } = extractSourceFromComment(commentRaw);
 
+            const languageRaw: string | null =
+  (li.properties?.language as string | null) ??
+  (li.properties?.lang as string | null) ??
+  null;
+
+const language = normalizeCTLanguage(languageRaw);
+
             const allocRatio = linesGross > 0 ? gross / linesGross : 0;
             const sellerFeeNum = order.sellerFeeEur == null ? null : Number(order.sellerFeeEur);
             const shippingNum  = order.shippingEur == null ? null : Number(order.shippingEur);
@@ -192,6 +230,7 @@ if (to)   qs.set("to", to);
                 scryfallId: li.scryfall_id ?? null,
                 isFoil: !!li.properties?.mtg_foil,
                 condition: li.properties?.condition ?? null,
+                language,
                 quantity: qty,
                 unitPriceEur: unit,
                 lineGrossEur: gross,
@@ -206,13 +245,14 @@ if (to)   qs.set("to", to);
                 scryfallId: li.scryfall_id ?? null,
                 isFoil: !!li.properties?.mtg_foil,
                 condition: li.properties?.condition ?? null,
+                language,
                 quantity: qty,
                 unitPriceEur: unit,
                 lineGrossEur: gross,
                 createdAt: li.created_at ? new Date(li.created_at) : null,
                 commentRaw,
               },
-              select: { ctLineId: true, blueprintId: true, cardmarketId: true, scryfallId: true, isFoil: true, condition: true, quantity: true },
+              select: { ctLineId: true, blueprintId: true, cardmarketId: true, scryfallId: true, isFoil: true, condition: true, language: true, quantity: true },
             });
 
             const ts = (order.paidAt ?? order.sentAt ?? (li.created_at ? new Date(li.created_at) : new Date()));
@@ -233,6 +273,7 @@ await prisma.salesLog.upsert({
     scryfallId: line.scryfallId ?? null,
     isFoil: line.isFoil,
     condition: line.condition ?? null,
+    language: line.language ?? language ?? "EN",
     qty,
     unitPriceEur: unit,
     lineTotalEur: gross,
@@ -256,6 +297,7 @@ await prisma.salesLog.upsert({
     scryfallId: line.scryfallId ?? null,
     isFoil: line.isFoil,
     condition: line.condition ?? null,
+    language: line.language ?? language ?? "EN",
     qty,
     unitPriceEur: unit,
     lineTotalEur: gross,
