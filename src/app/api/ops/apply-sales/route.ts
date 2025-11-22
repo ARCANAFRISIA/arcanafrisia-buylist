@@ -202,6 +202,7 @@ if (idsParam) {
       cardmarketId: number;
       isFoil: boolean;
       condition: string;
+      language: string;
       qty: number;
     }> = [];
 
