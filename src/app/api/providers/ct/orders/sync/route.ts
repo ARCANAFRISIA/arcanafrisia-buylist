@@ -35,36 +35,45 @@ const CT_TOKEN = process.env.CT_TOKEN;
 
 const centsToEur = (c?: number | null) => c == null ? null : Number((c / 100).toFixed(2));
 
-function normalizeCTLanguage(raw?: string | null): string {
-  if (!raw) return "EN"; // default
+function normalizeCTLanguage(raw?: string | null): string | null {
+  if (!raw) return null; // ⬅️ geen EN meer forceren hier
 
   const s = raw.trim().toUpperCase();
 
   const map: Record<string, string> = {
     "EN": "EN",
     "ENGLISH": "EN",
+
     "DE": "DE",
     "GERMAN": "DE",
+
     "FR": "FR",
     "FRENCH": "FR",
+
     "ES": "ES",
     "SPANISH": "ES",
+
     "IT": "IT",
     "ITALIAN": "IT",
+
     "PT": "PT",
     "PORTUGUESE": "PT",
+
     "JA": "JA",
     "JP": "JA",
+    "JPN": "JA",
     "JAPANESE": "JA",
-    "ZH": "ZHS",            // evt. splitten als CT dat doet
+
+    "ZH": "ZHS",
     "CHINESE": "ZHS",
   };
 
   if (map[s]) return map[s];
 
-  // fallback: eerste 2 letters, bv "ENGLISH (EU)" → "EN"
+  // fallback: eerste 2 letters, bv. "JAPANISCH" -> "JA"
   return s.slice(0, 2);
 }
+
 
 // --- TERUG naar jouw simpele fetch; geen extra headers, geen andere params ---
 async function ctFetch(path: string) {
@@ -206,14 +215,18 @@ if (to)   qs.set("to", to);
             const gross = Number((unit * qty).toFixed(2));
 
             const commentRaw: string | null = li.description ?? null;
-            const { code: sourceCode, date: sourceDate } = extractSourceFromComment(commentRaw);
+const { code: sourceCode, date: sourceDate } = extractSourceFromComment(commentRaw);
 
-            const languageRaw: string | null =
+const languageRaw: string | null =
   (li.properties?.language as string | null) ??
   (li.properties?.lang as string | null) ??
+  (li.properties?.mtg_language as string | null) ??
+  (li.properties?.mtg_lang as string | null) ??
+  (li.language as string | null) ??      // fallback: eventuele top-level
   null;
 
 const language = normalizeCTLanguage(languageRaw);
+
 
             const allocRatio = linesGross > 0 ? gross / linesGross : 0;
             const sellerFeeNum = order.sellerFeeEur == null ? null : Number(order.sellerFeeEur);
@@ -273,7 +286,8 @@ await prisma.salesLog.upsert({
     scryfallId: line.scryfallId ?? null,
     isFoil: line.isFoil,
     condition: line.condition ?? null,
-    language: line.language ?? language ?? "EN",
+    language: line.language ?? language ?? undefined,
+
     qty,
     unitPriceEur: unit,
     lineTotalEur: gross,
@@ -297,7 +311,8 @@ await prisma.salesLog.upsert({
     scryfallId: line.scryfallId ?? null,
     isFoil: line.isFoil,
     condition: line.condition ?? null,
-    language: line.language ?? language ?? "EN",
+    language: line.language ?? language ?? undefined,
+
     qty,
     unitPriceEur: unit,
     lineTotalEur: gross,

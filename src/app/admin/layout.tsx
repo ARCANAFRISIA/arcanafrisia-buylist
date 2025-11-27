@@ -13,7 +13,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <Link href="/admin/exports/idle">Idle Export</Link>
           <Link href="/admin/inventory" className="block hover:text-blue-400">
             Inventory overview</Link>
-          <Link href="/admin/stock-in">Stock in</Link>  
+          <Link href="/admin/stock-in">Stock in</Link>
+          <Link href="/admin/tools/oversell">Oversell</Link>
           {/* voeg later meer items toe */}
         </nav>
       </aside>

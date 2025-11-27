@@ -17,6 +17,16 @@ function csvEscape(s: string | number | boolean | null | undefined) {
   return v;
 }
 
+function conditionToCtBucket(cond: string | null | undefined): string {
+  const c = (cond || "NM").toUpperCase();
+  if (c === "NEAR MINT" || c === "NM") return "NM";
+  if (c === "SLIGHTLY PLAYED" || c === "EX") return "EX";
+  if (c === "MODERATELY PLAYED" || c === "GD") return "GD";
+  if (c === "PLAYED" || c === "LP" || c === "PL") return "PL"; // als CT PL/LP gebruikt
+  return "NM"; // veilige default
+}
+
+
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
 const channel = (url.searchParams.get("channel") || "CM").toUpperCase();
@@ -228,6 +238,36 @@ const newStockMap = new Map<string, number>();
     }
   }
 
+    // CT min per conditie + foil uit CTMarketLatest
+  type CtLatestRow = {
+    cardmarketId: number;
+    isFoil: boolean;
+    bucket: string;
+    minPrice: number | null;
+  };
+
+  const ctMinByCond = new Map<string, number>(); // key: cmid|foil|bucket
+
+  if (cmIds.length) {
+    const ctRows = await prisma.$queryRawUnsafe<CtLatestRow[]>(`
+      SELECT "cardmarketId","isFoil","bucket","minPrice"
+      FROM "CTMarketLatest"
+      WHERE "cardmarketId" = ANY($1)
+    `, cmIds);
+
+    for (const r of ctRows) {
+      if (r.minPrice == null) continue;
+      const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${(r.bucket || "").toUpperCase()}`;
+      const val = Number(r.minPrice);
+      // als er meerdere snapshots zijn, pak de laagste minPrice
+      const existing = ctMinByCond.get(key);
+      if (existing == null || val < existing) {
+        ctMinByCond.set(key, val);
+      }
+    }
+  }
+
+
   // Helper: haal FIFO bron (sourceCode) van eerste lot met voorraad
   async function firstLotSourceCode(
   cmid: number,
@@ -265,53 +305,103 @@ const newStockMap = new Map<string, number>();
     const soldSinceUpdate = soldMap.get(key) || 0;
     const newStockSince   = newStockMap.get(key) || 0;
 
-    // Welke “activiteit” telt, hangt af van de mode:
-    const activity = mode === "relist" ? soldSinceUpdate : newStockSince;
+    if (b.qtyOnHand <= 0) continue;
 
-    // Niks verkocht / niks nieuw, en geen voorraad → skip
-    if (activity <= 0 && b.qtyOnHand <= 0) continue;
+    let addQty = 0;
 
-    // tier kiezen
-    const tier = policy.tiers.find(t => b.qtyOnHand >= t.minOnHand) || null;
-    const policyCap = tier?.listQty ?? 0;
+    if (mode === "relist") {
+      // 🔁 Relist: gebaseerd op verkochte aantallen sinds 'since'
+      if (soldSinceUpdate <= 0) continue;
 
-    // addQty = MAX(0, MIN(activity, policyCap, onHand))
-    const addQty = Math.max(0, Math.min(activity, policyCap, b.qtyOnHand));
-    if (addQty <= 0) continue;
+      const tierNow = policy.tiers.find(t => b.qtyOnHand >= t.minOnHand) || null;
+      const capNow  = tierNow?.listQty ?? 0;
 
+      addQty = Math.max(
+        0,
+        Math.min(soldSinceUpdate, capNow, b.qtyOnHand)
+      );
+    } else {
+      // 🆕 Newstock: alleen het extra boven wat je *voor* de restock zou willen
+      if (newStockSince <= 0) continue;
 
-    // prijs: max(CT_min, CM_trend * 1.10), afronden 0.05
-    const cmTrend = cmTrendMap.get(b.cardmarketId) ?? null;
-    const ctMin   = ctMinMap.get(b.cardmarketId) ?? null;
+      // Huidige tier / cap op basis van huidige voorraad
+      const tierNow = policy.tiers.find(t => b.qtyOnHand >= t.minOnHand) || null;
+      const capNow  = tierNow?.listQty ?? 0;
+
+      // Schatting oude voorraad vóór deze new stock
+      const oldOnHand = Math.max(0, b.qtyOnHand - newStockSince);
+
+      // Tier / cap op basis van oude voorraad
+      const tierOld = policy.tiers.find(t => oldOnHand >= t.minOnHand) || null;
+      const capOld  = tierOld?.listQty ?? 0;
+
+      const desiredNow = Math.min(capNow, b.qtyOnHand);
+      const desiredOld = Math.min(capOld, oldOnHand);
+
+      const extraNeeded = Math.max(0, desiredNow - desiredOld);
+
+      // Nooit meer exporteren dan er nieuwe stock bijgekomen is of wat je op voorraad hebt
+      addQty = Math.max(
+        0,
+        Math.min(extraNeeded, newStockSince, b.qtyOnHand)
+      );
+    }
+
+        if (addQty <= 0) continue;
 
     let price: number | null = null;
 
-if (mode === "relist") {
-  const last = await lastSoldUnitPrice(b.cardmarketId, b.isFoil, b.condition, b.language, effectiveSince);
+    if (mode === "relist") {
+      const last = await lastSoldUnitPrice(
+        b.cardmarketId,
+        b.isFoil,
+        b.condition,
+        b.language,
+        effectiveSince
+      );
 
-  if (last != null && last > 0) {
-    price = last * (1 + (isFinite(markupPct) ? markupPct : 0.05));
-  } else {
-    // fallback: newstock-regel
-    const cmTrend = cmTrendMap.get(b.cardmarketId) ?? null;
-    const ctMin   = ctMinMap.get(b.cardmarketId) ?? null;
-    if (cmTrend != null || ctMin != null) {
-      const base = Math.max(ctMin ?? 0, (cmTrend ?? 0) * 1.10);
-      price = base;
+      if (last != null && last > 0) {
+        // markupPct uit de query (0.05 = 5%, 0 = geen opslag)
+        price = last * (1 + (isFinite(markupPct) ? markupPct : 0.05));
+      } else {
+        // fallback: marktprijzen – eerst CT per conditie, dan CT summary, dan CM trend
+        const cmTrend = cmTrendMap.get(b.cardmarketId) ?? null;
+
+        const bucket = conditionToCtBucket(b.condition);
+        const ctKey  = `${b.cardmarketId}|${b.isFoil ? 1 : 0}|${bucket}`;
+        const ctMinByBucket = ctMinByCond.get(ctKey) ?? null;
+
+        const ctMinGlobal = ctMinMap.get(b.cardmarketId) ?? null;
+        const ctMin = ctMinByBucket ?? ctMinGlobal;
+
+        if (cmTrend != null || ctMin != null) {
+          const base = ctMin ?? (cmTrend ?? 0) * 1.10;
+
+          price = base;
+        }
+      }
+    } else {
+      // mode === "newstock"
+      const cmTrend = cmTrendMap.get(b.cardmarketId) ?? null;
+
+      const bucket = conditionToCtBucket(b.condition);
+      const ctKey  = `${b.cardmarketId}|${b.isFoil ? 1 : 0}|${bucket}`;
+      const ctMinByBucket = ctMinByCond.get(ctKey) ?? null;
+
+      const ctMinGlobal = ctMinMap.get(b.cardmarketId) ?? null;
+      const ctMin = ctMinByBucket ?? ctMinGlobal;
+
+      if (cmTrend != null || ctMin != null) {
+        const base = Math.max(ctMin ?? 0, (cmTrend ?? 0) * 1.10);
+        price = base;
+      } else {
+        // Fallback voor kaarten zonder marktprijs
+        price = 1000; // Signaalwaarde zodat je ze handmatig checkt
+      }
     }
-  }
-} else { // mode === "newstock"
-  const cmTrend = cmTrendMap.get(b.cardmarketId) ?? null;
-  const ctMin   = ctMinMap.get(b.cardmarketId) ?? null;
 
-  if (cmTrend != null || ctMin != null) {
-    const base = Math.max(ctMin ?? 0, (cmTrend ?? 0) * 1.10);
-    price = base;
-  } else {
-    // Fallback voor kaarten zonder marktprijs
-    price = 1000; // Signaalwaarde zodat je ze handmatig checkt
-  }
-}
+   
+
 
 
 // afronden

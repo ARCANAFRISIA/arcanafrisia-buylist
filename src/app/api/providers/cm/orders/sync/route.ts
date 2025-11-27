@@ -10,6 +10,27 @@ const toBool = (b: any): boolean => {
   return false; // fallback: geen null meer richting Prisma
 };
 
+function mapCmLanguage(raw: any): string | null {
+  if (!raw) return null;
+
+  // Als het een object is: Cardmarket geeft meestal { idLanguage, languageName }
+  const candidate =
+    typeof raw === "object"
+      ? (raw.languageName ?? raw.name ?? raw.idLanguage ?? raw.id)
+      : raw;
+
+  const s = candidate.toString().trim().toUpperCase();
+  if (!s) return null;
+
+  // Namen / afkortingen
+  if (["EN", "ENG", "ENGLISH"].includes(s)) return "EN";
+  if (["DE", "GER", "GERMAN"].includes(s)) return "DE";
+  if (["JA", "JP", "JPN", "JAPANESE"].includes(s)) return "JA";
+
+  // Voor nu niks geks doen met andere talen
+  return null;
+}
+
 
 // Zelfde extractor als CT (bron uit comment), lokaal houden om geen imports te breken
 function extractSourceFromComment(s?: string | null): { code?: string; date?: Date } {
@@ -158,6 +179,9 @@ export async function GET(req: Request) {
           const commentRaw = li.comments ?? li.comment ?? null;
           const { code: sourceCode, date: sourceDate } = extractSourceFromComment(commentRaw);
 
+          const langRaw = li.language?.languageName ?? li.language ?? null;
+          const langCode = mapCmLanguage(li.language ?? langRaw);
+
           const line = await prisma.cMOrderLine.upsert({
             where: { cmLineId },
             update: {
@@ -213,6 +237,8 @@ export async function GET(req: Request) {
                 comment: commentRaw ?? undefined,
                 sourceCode: sourceCode ?? undefined,
                 sourceDate: sourceDate ?? undefined,
+                language: langCode ?? undefined,
+
               },
               create: {
                 source: "CM",
@@ -233,6 +259,8 @@ export async function GET(req: Request) {
                 comment: commentRaw ?? undefined,
                 sourceCode: sourceCode ?? undefined,
                 sourceDate: sourceDate ?? undefined,
+                language: langCode ?? undefined,
+
               }
             });
             salesUpserts++;
