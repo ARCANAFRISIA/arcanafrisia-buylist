@@ -114,11 +114,12 @@ export async function GET(req: Request) {
           eur: parsePrice(data.prices?.eur) ?? null,
           tix: parsePrice(data.prices?.tix) ?? null,
           edhrecRank: data.edhrec_rank ?? null,
-          legalities:
-  data.legalities !== undefined
-    ? (data.legalities as Prisma.JsonValue)
-    : undefined,
-
+          legalities: {
+  set:
+    data.legalities !== undefined && data.legalities !== null
+      ? (data.legalities as Prisma.JsonValue)
+      : null
+},
 
           gameChanger: data.game_changer ?? null,
         },
@@ -135,11 +136,12 @@ export async function GET(req: Request) {
           eur: parsePrice(data.prices?.eur) ?? null,
           tix: parsePrice(data.prices?.tix) ?? null,
           edhrecRank: data.edhrec_rank ?? null,
-          legalities:
-  data.legalities !== undefined
-    ? (data.legalities as Prisma.JsonValue)
-    : undefined,
-
+          legalities: {
+  set:
+    data.legalities !== undefined && data.legalities !== null
+      ? (data.legalities as Prisma.JsonValue)
+      : null
+},
 
           gameChanger: data.game_changer ?? null,
         },
