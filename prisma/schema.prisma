@@ -168,6 +168,9 @@ model ScryfallLookup {
   usd             Float?
   eur             Float?
   tix             Float?
+  edhrecRank      Int?
+  legalities      Json?
+  gameChanger     Boolean?
   updatedAt       DateTime @updatedAt
 }
 

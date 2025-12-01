@@ -14,6 +14,9 @@ type SFResp = {
   lang?: string;
   image_uris?: { small?: string; normal?: string };
   prices?: { usd?: string | null; eur?: string | null; tix?: string | null };
+  edhrec_rank?: number;
+  legalities?: Record<string, string>;
+  game_changer?: boolean;
 };
 
 type FetchOk = { ok: true; data: SFResp };
@@ -108,6 +111,9 @@ export async function GET(req: Request) {
           usd: parsePrice(data.prices?.usd) ?? null,
           eur: parsePrice(data.prices?.eur) ?? null,
           tix: parsePrice(data.prices?.tix) ?? null,
+          edhrecRank: data.edhrec_rank ?? null,
+          legalities: data.legalities ?? null,
+          gameChanger: data.game_changer ?? null,
         },
         update: {
           scryfallId: data.id,
@@ -121,6 +127,9 @@ export async function GET(req: Request) {
           usd: parsePrice(data.prices?.usd) ?? null,
           eur: parsePrice(data.prices?.eur) ?? null,
           tix: parsePrice(data.prices?.tix) ?? null,
+          edhrecRank: data.edhrec_rank ?? null,
+          legalities: data.legalities ?? null,
+          gameChanger: data.game_changer ?? null,
         },
       });
 

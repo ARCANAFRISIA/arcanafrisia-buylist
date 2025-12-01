@@ -178,17 +178,22 @@ export async function GET(req: NextRequest) {
     const cutoff = new Date(now);
     cutoff.setDate(cutoff.getDate() - minIdleDays);
 
-    // 🔹 AANPASSING: ook lastSaleAt IS NULL meenemen als idle
-    const balances = await prisma.inventoryBalance.findMany({
-      where: {
-        qtyOnHand: { gt: 0 },
-        OR: [
-          { lastSaleAt: { lte: cutoff } },
-          { lastSaleAt: null },
-        ],
+   const balances = await prisma.inventoryBalance.findMany({
+  where: {
+    qtyOnHand: { gt: 0 },
+    OR: [
+      // kaarten met sales: lastSaleAt ouder dan cutoff
+      { lastSaleAt: { lte: cutoff } },
+      // kaarten zonder sales: alleen als createdAt ook ouder is dan cutoff
+      {
+        lastSaleAt: null,
+        createdAt: { lte: cutoff },
       },
-      orderBy: { lastSaleAt: "asc" },
-    });
+    ],
+  },
+  orderBy: { lastSaleAt: "asc" },
+});
+
 
     if (balances.length === 0) {
       if (format === "csv") {
@@ -282,19 +287,27 @@ export async function GET(req: NextRequest) {
       });
 
       // 🔹 AANPASSING: idleDays voor NULL lastSaleAt → treat as "minIdleDays"
-      let idleDays: number;
-      if (bal.lastSaleAt) {
-        const lastSaleAt = new Date(bal.lastSaleAt);
-        const idleMs = now.getTime() - lastSaleAt.getTime();
-        idleDays = Math.floor(idleMs / (1000 * 60 * 60 * 24));
-        if (idleDays < minIdleDays) {
-          // safety, zou eigenlijk niet meer voorkomen door de where-filter
-          continue;
-        }
-      } else {
-        // nooit verkocht in gemeten periode → voor BF tellen we ze als idle
-        idleDays = minIdleDays;
-      }
+     let idleDays: number;
+
+if (bal.lastSaleAt) {
+  const lastSaleAt = new Date(bal.lastSaleAt);
+  const idleMs = now.getTime() - lastSaleAt.getTime();
+  idleDays = Math.floor(idleMs / (1000 * 60 * 60 * 24));
+  if (idleDays < minIdleDays) {
+    // safety, zou niet meer moeten gebeuren door de where-filter
+    continue;
+  }
+} else {
+  // nooit verkocht → idleDays op basis van createdAt
+  const createdAt = bal.createdAt ? new Date(bal.createdAt) : cutoff;
+  const idleMs = now.getTime() - createdAt.getTime();
+  idleDays = Math.floor(idleMs / (1000 * 60 * 60 * 24));
+  if (idleDays < minIdleDays) {
+    // extra safety, maar deze zou door de where ook niet meer binnenkomen
+    continue;
+  }
+}
+
 
       const languageCode: string = (bal.language ?? "EN").toString().toUpperCase();
       const languageCmId: number | null =
