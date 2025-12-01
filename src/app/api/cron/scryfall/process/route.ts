@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+
 
 export const maxDuration = 300; // Vercel-friendly
 
@@ -112,7 +114,10 @@ export async function GET(req: Request) {
           eur: parsePrice(data.prices?.eur) ?? null,
           tix: parsePrice(data.prices?.tix) ?? null,
           edhrecRank: data.edhrec_rank ?? null,
-          legalities: data.legalities ?? null,
+          legalities: data.legalities !== undefined
+  ? (data.legalities as Prisma.JsonValue)
+  : Prisma.JsonNull,
+
           gameChanger: data.game_changer ?? null,
         },
         update: {
@@ -128,7 +133,10 @@ export async function GET(req: Request) {
           eur: parsePrice(data.prices?.eur) ?? null,
           tix: parsePrice(data.prices?.tix) ?? null,
           edhrecRank: data.edhrec_rank ?? null,
-          legalities: data.legalities ?? null,
+          legalities: data.legalities !== undefined
+  ? (data.legalities as Prisma.JsonValue)
+  : Prisma.JsonNull,
+
           gameChanger: data.game_changer ?? null,
         },
       });
