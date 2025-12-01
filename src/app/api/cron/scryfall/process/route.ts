@@ -114,7 +114,7 @@ export async function GET(req: Request) {
           eur: parsePrice(data.prices?.eur) ?? null,
           tix: parsePrice(data.prices?.tix) ?? null,
           edhrecRank: data.edhrec_rank ?? null,
-          llegalities:
+          legalities:
   data.legalities !== undefined
     ? (data.legalities as Prisma.JsonValue)
     : undefined,
