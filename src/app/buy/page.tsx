@@ -32,6 +32,14 @@ type Item = {
   gameChanger?: boolean | null;
 };
 
+type CartShape = {
+  items: {
+    cardmarketId?: number | null;
+    qty: number;
+  }[];
+};
+
+
 
 type BuyItem = Item; // alias ter vervanging van dubbele 'Item' definities
 
@@ -115,12 +123,12 @@ export default function BuyPage() {
     }));
 
 
-    // hoeveel mogen we nog bijkopen voor deze cardmarketId t.o.v. de cap?
+    
+// hoeveel mogen we nog bijkopen voor deze cardmarketId t.o.v. de cap?
 function remainingCapForItem(
-  it: Item | null,
-  cart: ReturnType<typeof useCart>
+  it: Item,
+  cart: { items: Array<{ cardmarketId?: number | null; qty: number }> }
 ): number | null {
-  if (!it) return null;
   const maxBuy = it.maxBuy;
   const cmId = it.cardmarketId ?? null;
 
@@ -131,8 +139,11 @@ function remainingCapForItem(
     .filter((c) => c.cardmarketId === cmId)
     .reduce((sum, c) => sum + c.qty, 0);
 
-  return maxBuy - inCart;     
+  const remaining = maxBuy - inCart;
+  return remaining <= 0 ? 0 : remaining;
 }
+
+
 
 
 const handleAdd = (it: BuyItem) => {
