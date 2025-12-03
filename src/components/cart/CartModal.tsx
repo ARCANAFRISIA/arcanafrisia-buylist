@@ -67,7 +67,8 @@ export default function CartModal() {
             const line = i.payout * i.qty;
             return (
               <div
-                key={i.id}
+                key={`${i.id}-${i.condition}-${i.foil}-${i.qty}`}
+
                 className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--bg2)] p-3"
               >
                 <div className="flex items-center gap-3 min-w-0">
