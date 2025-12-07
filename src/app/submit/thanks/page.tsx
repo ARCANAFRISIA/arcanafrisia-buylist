@@ -3,11 +3,11 @@ import Link from "next/link";
 const GOLD = "#C9A24E";
 
 type ThanksPageProps = {
-  searchParams: { id?: string };
+  searchParams: Promise<{ id?: string }>;
 };
 
-export default function ThanksPage({ searchParams }: ThanksPageProps) {
-  const id = searchParams.id ?? "";
+export default async function ThanksPage({ searchParams }: ThanksPageProps) {
+  const { id = "" } = await searchParams;
 
   return (
     <div

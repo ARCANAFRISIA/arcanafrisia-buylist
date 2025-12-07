@@ -102,8 +102,10 @@ export default function SubmitPage() {
             {i.foil ? " (Foil)" : ""}
           </span>
           <span className="af-muted text-xs">
-            {i.set} • {i.condition} • Qty {i.qty}
-          </span>
+  {i.set}
+  {i.collectorNumber ? ` #${i.collectorNumber}` : ""} • {i.condition} • Qty {i.qty}
+</span>
+
         </div>
 
         <div className="tabular-nums font-semibold" style={{ color: "#C9A24E" }}>

@@ -42,6 +42,24 @@ const COND_CONFIG: Record<
   PO: { mult: 0.5, baseMinTrend: Number.POSITIVE_INFINITY, allowed: false },
 };
 
+// Basis payout% alleen op basis van trend-range (zonder boosts)
+// Wordt ook gebruikt door andere modules (pricing.ts) voor transparante referenties.
+export function computeBasePctFromTrend(trend: number | null): number {
+  if (trend == null || trend <= 0) return 0;
+
+  if (trend > 75) {
+    return 0.75;
+  } else if (trend > 3) {
+    return 0.70;
+  } else if (trend > 0.75) {
+    return 0.65;
+  } else {
+    // hier komen alleen uitzonderingen (<0.75) door small-card-boost-achtige dingen
+    return 0.65;
+  }
+}
+
+
 export function computeUnitFromTrend(input: EngineInput): EngineResult {
   const { trend, trendFoil, isFoil, cond } = input;
   const ctx: EngineCtx = input.ctx ?? {};
@@ -101,16 +119,9 @@ export function computeUnitFromTrend(input: EngineInput): EngineResult {
   }
 
   // 5️⃣ basis payout% op basis van prijsrange
-  let pct = 0;
-  if (usedTrend > 75) {
-    pct = 0.75;
-  } else if (usedTrend > 3) {
-    pct = 0.70;
-  } else if (usedTrend > 0.75) {
-    pct = 0.65;
-  } else {
-    pct = 0.65; // uitzonderings-kaarten <0.75
-  }
+  
+  let pct = computeBasePctFromTrend(usedTrend);
+
 
   // 6️⃣ boosts (EDHREC / tix / staples / velocity)
   const bumpTo = (target: number) => {

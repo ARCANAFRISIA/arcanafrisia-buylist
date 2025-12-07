@@ -127,6 +127,7 @@ export async function POST(req: NextRequest) {
         tix: true,
         edhrecRank: true,
         gameChanger: true,
+        collectorNumber: true,
       },
     });
 
@@ -135,6 +136,7 @@ export async function POST(req: NextRequest) {
       {
         name: string;
         set: string | null;
+        collectorNumber: string | null;
         tix: number | null;
         edhrecRank: number | null;
         gameChanger: boolean | null;
@@ -145,6 +147,7 @@ export async function POST(req: NextRequest) {
       metaById.set(m.cardmarketId as number, {
         name: m.name,
         set: m.set,
+        collectorNumber: (m.collectorNumber as string | null) ?? null,
         tix: m.tix == null ? null : Number(m.tix),
         edhrecRank: (m.edhrecRank as number | null) ?? null,
         gameChanger: (m.gameChanger as boolean | null) ?? null,
@@ -192,6 +195,7 @@ export async function POST(req: NextRequest) {
         return {
           idProduct,
           isFoil,
+          collectorNumber: meta?.collectorNumber ?? null,
           qty: 0,
           condKey,
           trend,
@@ -251,6 +255,7 @@ export async function POST(req: NextRequest) {
       return {
         idProduct,
         isFoil,
+        collectorNumber: meta?.collectorNumber ?? null,
         qty: acceptedQty,           // 🔴 hier staat nu de "geknipte" qty
         condKey,
         trend,
@@ -302,6 +307,10 @@ export async function POST(req: NextRequest) {
             unitCents: Math.round(r.unit * 100),
             lineCents: r.lineCents,
             pct: Math.round(r.pct * 100),
+            collectorNumber: r.collectorNumber ?? null,
+            cardName: metaById.get(r.idProduct)?.name ?? null,
+            setCode: metaById.get(r.idProduct)?.set ?? null,
+            condition: r.condKey,
           })),
         },
         metaText: JSON.stringify({
@@ -327,61 +336,72 @@ export async function POST(req: NextRequest) {
     const lookups = cmIdsForMail.length
       ? await prisma.scryfallLookup.findMany({
           where: { cardmarketId: { in: cmIdsForMail } },
-          select: { cardmarketId: true, name: true, set: true },
+          select: { cardmarketId: true, name: true, set: true, collectorNumber: true, },
         })
       : [];
 
-    const nameById = new Map<number, { name: string; set: string | null }>();
-    for (const r of lookups) {
-      nameById.set(r.cardmarketId as number, {
-        name: r.name,
-        set: r.set,
-      });
-    }
+    const nameById = new Map<
+  number,
+  { name: string; set: string | null; collectorNumber: string | null }
+>();
+for (const r of lookups) {
+  nameById.set(r.cardmarketId as number, {
+    name: r.name,
+    set: r.set,
+    collectorNumber: (r.collectorNumber as string | null) ?? null,
+  });
+}
 
     // helper: sorteer items op set + naam en maak nette labels
-    function buildMailItems() {
-      type WithMeta = {
-        item: (typeof submission.items)[number];
-        meta?: { name: string; set: string | null };
-      };
+function buildMailItems() {
+  type WithMeta = {
+    item: (typeof submission.items)[number];
+    meta?: {
+      name: string;
+      set: string | null;
+      collectorNumber: string | null; 
+    };
+  };
 
-      const enriched: WithMeta[] = submission.items.map((item) => {
-        const cmId = Number(item.productId);
-        const meta = nameById.get(cmId);
-        return { item, meta };
-      });
+  const enriched: WithMeta[] = submission.items.map((item) => {
+    const cmId = Number(item.productId);
+    const meta = nameById.get(cmId);
+    return { item, meta };
+  });
 
-      // sorteren op set (asc) en dan naam (asc)
-      enriched.sort((a, b) => {
-        const setA = (a.meta?.set || "").toUpperCase();
-        const setB = (b.meta?.set || "").toUpperCase();
-        if (setA < setB) return -1;
-        if (setA > setB) return 1;
+  // sorteren op set (asc) en dan naam (asc)
+  enriched.sort((a, b) => {
+    const setA = (a.meta?.set || "").toUpperCase();
+    const setB = (b.meta?.set || "").toUpperCase();
+    if (setA < setB) return -1;
+    if (setA > setB) return 1;
 
-        const nameA = (a.meta?.name || "").toUpperCase();
-        const nameB = (b.meta?.name || "").toUpperCase();
-        if (nameA < nameB) return -1;
-        if (nameA > nameB) return 1;
+    const nameA = (a.meta?.name || "").toUpperCase();
+    const nameB = (b.meta?.name || "").toUpperCase();
+    if (nameA < nameB) return -1;
+    if (nameA > nameB) return 1;
 
-        return 0;
-      });
+    return 0;
+  });
 
-      return enriched.map(({ item, meta }) => {
-        const cmId = Number(item.productId);
-        const base = meta
-          ? `${meta.name}${meta.set ? ` [${meta.set.toUpperCase()}]` : ""}`
-          : `#${cmId}`;
-        const label = `${base}${item.isFoil ? " (Foil)" : ""}`;
+  return enriched.map(({ item, meta }) => {
+    const cmId = Number(item.productId);
+    const base = meta
+      ? `${meta.name}${
+          meta.set ? ` [${meta.set.toUpperCase()}]` : ""
+        }${meta.collectorNumber ? ` #${meta.collectorNumber}` : ""}`
+      : `#${cmId}`;
+    const label = `${base}${item.isFoil ? " (Foil)" : ""}`;
 
-        return {
-          name: label,
-          qty: item.qty,
-          unitCents: Number(item.unitCents ?? 0),
-          lineCents: Number(item.lineCents ?? 0),
-        };
-      });
-    }
+    return {
+      name: label,
+      qty: item.qty,
+      unitCents: Number(item.unitCents ?? 0),
+      lineCents: Number(item.lineCents ?? 0),
+    };
+  });
+}
+
 
     const mailItems = buildMailItems();
 

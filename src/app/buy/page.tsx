@@ -9,6 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import CartModal from "@/components/cart/CartModal";
 import { computeUnitFromTrend, type CondKey } from "@/lib/buylistEngineCore";
+import Link from "next/link";
+import BuyHeader from "@/components/buy/BuyHeader";
+
 
 const GOLD = "#C9A24E";
 
@@ -19,6 +22,7 @@ type Item = {
   id: string;
   name: string;
   set: string;
+  collectorNumber?: string | null;
   imageSmall?: string | null;
   imageNormal?: string | null;
   cardmarketId?: number | null;
@@ -122,52 +126,46 @@ export default function BuyPage() {
       [id]: { ...getPref(id), foil: !getPref(id).foil },
     }));
 
+  // hoeveel mogen we nog bijkopen voor deze cardmarketId t.o.v. de cap?
+  function remainingCapForItem(
+    it: Item,
+    cart: { items: Array<{ cardmarketId?: number | null; qty: number }> }
+  ): number | null {
+    const maxBuy = it.maxBuy;
+    const cmId = it.cardmarketId ?? null;
 
-    
-// hoeveel mogen we nog bijkopen voor deze cardmarketId t.o.v. de cap?
-function remainingCapForItem(
-  it: Item,
-  cart: { items: Array<{ cardmarketId?: number | null; qty: number }> }
-): number | null {
-  const maxBuy = it.maxBuy;
-  const cmId = it.cardmarketId ?? null;
+    if (maxBuy == null || cmId == null) return null; // geen cap bekend
 
-  if (maxBuy == null || cmId == null) return null; // geen cap bekend
+    // totalen in de cart voor deze cardmarketId (alle condities/foils samen)
+    const inCart = cart.items
+      .filter((c) => c.cardmarketId === cmId)
+      .reduce((sum, c) => sum + c.qty, 0);
 
-  // totalen in de cart voor deze cardmarketId (alle condities/foils samen)
-  const inCart = cart.items
-    .filter((c) => c.cardmarketId === cmId)
-    .reduce((sum, c) => sum + c.qty, 0);
+    const remaining = maxBuy - inCart;
+    return remaining <= 0 ? 0 : remaining;
+  }
 
-  const remaining = maxBuy - inCart;
-  return remaining <= 0 ? 0 : remaining;
-}
+  const handleAdd = (it: BuyItem) => {
+    const pref = getPref(it.id);
+    const payout = computeClientPayout(it, pref);
+    if (!payout) return;
 
+    const remaining = remainingCapForItem(it, cart);
+    if (remaining !== null && remaining <= 0) return; // cap bereikt
 
-
-
-const handleAdd = (it: BuyItem) => {
-  const pref = getPref(it.id);
-  const payout = computeClientPayout(it, pref);
-  if (!payout) return;
-
-  const remaining = remainingCapForItem(it, cart);
-  if (remaining !== null && remaining <= 0) return; // cap bereikt
-
-  cart.add({
-    id: it.id,
-    name: it.name,
-    set: it.set,
-    imageSmall: it.imageSmall,
-    cardmarketId: it.cardmarketId ?? undefined,
-    payout,
-    foil: pref.foil,
-    condition: pref.condition,
-    qty: 1,
-  });
-};
-
-
+    cart.add({
+      id: it.id,
+      name: it.name,
+      set: it.set,
+      imageSmall: it.imageSmall,
+      cardmarketId: it.cardmarketId ?? undefined,
+      payout,
+      foil: pref.foil,
+      condition: pref.condition,
+      qty: 1,
+      collectorNumber: it.collectorNumber ?? undefined,
+    });
+  };
 
   // Which item is currently previewed in list view
   const [preview, setPreview] = useState<Item | null>(null);
@@ -213,13 +211,12 @@ const handleAdd = (it: BuyItem) => {
 
   // Preview prefs/payout
   const previewPref = preview ? getPref(preview.id) : null;
-const previewPayout =
-  preview && previewPref ? computeClientPayout(preview, previewPref) : null;
-const remaining = preview ? remainingCapForItem(preview, cart) : null;
-const atCap = remaining !== null && remaining <= 0;
+  const previewPayout =
+    preview && previewPref ? computeClientPayout(preview, previewPref) : null;
+  const remaining = preview ? remainingCapForItem(preview, cart) : null;
+  const atCap = remaining !== null && remaining <= 0;
 
-
-
+  // ---------- JSX ----------
   return (
     <div
       className="min-h-screen text-slate-200"
@@ -227,27 +224,24 @@ const atCap = remaining !== null && remaining <= 0;
         background: "linear-gradient(180deg, #050910 0%, #0B1220 100%)",
       }}
     >
-      {/* ✅ HEADER */}
-      <header className="w-full bg-transparent">
-        <div className="mx-auto w-full max-w-[1500px] px-6 lg:px-12 pt-8 pb-4 flex items-end justify-between gap-4">
-          <div>
-            <h1 className="text-3xl md:text-4xl font-semibold tracking-tight af-text">
-              Sell Your Magic: the Gathering Cards
-            </h1>
-            <p className="mt-1 af-muted">
-              Premium payouts • Snelle beoordeling • Transparant
-            </p>
-          </div>
-          <CartModal />
-        </div>
-      </header>
+      {/* Top navigatie / cart */}
+      <BuyHeader />
 
-      {/* ✅ MAIN CONTENT (centered) */}
-      <main className="mx-auto w-full max-w-[1200px] px-6 lg:px-12 pb-16">
+      {/* MAIN CONTENT (centered) */}
+      <main className="mx-auto w-full max-w-[1200px] px-6 lg:px-12 pb-16 pt-6">
+        {/* Hero / intro onder de nav */}
+        <section className="mb-6">
+          <h1 className="text-3xl md:text-4xl font-semibold tracking-tight af-text">
+            Sell Your Magic: the Gathering Cards
+          </h1>
+          <p className="mt-1 af-muted">
+            Premium payouts • Snelle beoordeling • Transparant
+          </p>
+        </section>
+
         {/* SEARCH AND TOOLS */}
         <div className="sticky top-16 z-10 rounded-xl af-panel border p-3">
           <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] items-center">
-            
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -293,7 +287,7 @@ const atCap = remaining !== null && remaining <= 0;
           </div>
         </div>
 
-        {/* ✅ GRID VIEW */}
+        {/* GRID VIEW */}
         {view === "grid" && (
           <div className="mt-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             {visible.map((it) => {
@@ -303,7 +297,6 @@ const atCap = remaining !== null && remaining <= 0;
               const remaining = remainingCapForItem(it, cart);
               const atCap = remaining !== null && remaining <= 0;
 
-
               return (
                 <Card key={it.id} className="group af-card border">
                   <CardHeader>
@@ -311,8 +304,9 @@ const atCap = remaining !== null && remaining <= 0;
                       {it.name}
                     </CardTitle>
                     <div className="af-muted text-xs">
-                      {it.set?.toUpperCase()}{" "}
-                      {it.rarity ? `• ${it.rarity}` : ""}
+                      {it.set?.toUpperCase()}
+                      {it.collectorNumber ? ` #${it.collectorNumber}` : ""}
+                      {it.rarity ? ` • ${it.rarity}` : ""}
                     </div>
                   </CardHeader>
 
@@ -380,18 +374,17 @@ const atCap = remaining !== null && remaining <= 0;
 
                       {/* add */}
                       <Button
-  size="sm"
-  disabled={!payout || atCap}
-  onClick={() => handleAdd(it)}
-  className="btn-gold font-semibold px-3 py-1.5"
->
-  {atCap
-    ? "Max bereikt"
-    : payout
-    ? `Add € ${payout.toFixed(2)}`
-    : "Add"}
-</Button>
-
+                        size="sm"
+                        disabled={!payout || atCap}
+                        onClick={() => handleAdd(it)}
+                        className="btn-gold font-semibold px-3 py-1.5"
+                      >
+                        {atCap
+                          ? "Max bereikt"
+                          : payout
+                          ? `Add € ${payout.toFixed(2)}`
+                          : "Add"}
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -412,7 +405,6 @@ const atCap = remaining !== null && remaining <= 0;
 
                 const remaining = remainingCapForItem(it, cart);
                 const atCap = remaining !== null && remaining <= 0;
-
 
                 return (
                   <div
@@ -451,7 +443,8 @@ const atCap = remaining !== null && remaining <= 0;
                         {it.name}
                       </div>
                       <div className="text-xs af-muted mt-[2px]">
-                        {it.set?.toUpperCase()}{" "}
+                        {it.set?.toUpperCase()}
+                        {it.collectorNumber ? ` #${it.collectorNumber}` : ""}
                         {it.rarity && (
                           <span
                             className={`ml-1 px-2 py-[1px] text-[10px] rounded ${rarityClass(
@@ -475,9 +468,7 @@ const atCap = remaining !== null && remaining <= 0;
                           € {payout.toFixed(2)}
                         </div>
                       ) : (
-                        <div className="text-xs af-muted mr-1">
-                          —
-                        </div>
+                        <div className="text-xs af-muted mr-1">—</div>
                       )}
 
                       <div className="hidden sm:block text-[10px] af-muted text-right mr-1">
@@ -523,21 +514,20 @@ const atCap = remaining !== null && remaining <= 0;
 
                       {/* add with price */}
                       <Button
-  size="sm"
-  disabled={!payout || atCap}
-  onClick={(e) => {
-    e.stopPropagation();
-    handleAdd(it);
-  }}
-  className="btn-gold font-semibold px-3 py-1.5"
->
-  {atCap
-    ? "Max bereikt"
-    : payout
-    ? `Add € ${payout.toFixed(2)}`
-    : "Add"}
-</Button>
-
+                        size="sm"
+                        disabled={!payout || atCap}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAdd(it);
+                        }}
+                        className="btn-gold font-semibold px-3 py-1.5"
+                      >
+                        {atCap
+                          ? "Max bereikt"
+                          : payout
+                          ? `Add € ${payout.toFixed(2)}`
+                          : "Add"}
+                      </Button>
                     </div>
                   </div>
                 );
@@ -557,6 +547,9 @@ const atCap = remaining !== null && remaining <= 0;
                   </div>
                   <div className="text-xs af-muted mb-3">
                     {preview.set?.toUpperCase()}
+                    {preview.collectorNumber
+                      ? ` #${preview.collectorNumber}`
+                      : ""}
                   </div>
 
                   {/* Big image */}
@@ -589,10 +582,7 @@ const atCap = remaining !== null && remaining <= 0;
                     <select
                       value={previewPref.condition}
                       onChange={(e) =>
-                        setPrefCond(
-                          preview.id,
-                          e.target.value as Condition
-                        )
+                        setPrefCond(preview.id, e.target.value as Condition)
                       }
                       className="h-9 rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-sm af-text"
                       title="Conditie"
@@ -605,34 +595,34 @@ const atCap = remaining !== null && remaining <= 0;
                     </select>
 
                     {/* Foil toggle */}
-                              <button
-            type="button"
-            onClick={() => togglePrefFoil(preview.id)}
-            className={[
-              "h-9 rounded-full px-3 text-sm font-medium border",
-              previewPref.foil
-                ? "border-[#2F415B] bg-[#2A3A52] text-white"
-                : "border-[var(--border)] bg-[var(--bg2)] af-text",
-            ].join(" ")}
-            title="Foil togglen"
-          >
-            {previewPref.foil ? "Foil ✓" : "Foil"}
-          </button>
-        </div>
+                    <button
+                      type="button"
+                      onClick={() => togglePrefFoil(preview.id)}
+                      className={[
+                        "h-9 rounded-full px-3 text-sm font-medium border",
+                        previewPref.foil
+                          ? "border-[#2F415B] bg-[#2A3A52] text-white"
+                          : "border-[var(--border)] bg-[var(--bg2)] af-text",
+                      ].join(" ")}
+                      title="Foil togglen"
+                    >
+                      {previewPref.foil ? "Foil ✓" : "Foil"}
+                    </button>
+                  </div>
 
-        {/* Add button */}
-        <div className="mt-4 grid place-items-center">
-          <Button
-            className="btn-gold font-semibold min-w-[180px]"
-            disabled={!previewPayout || atCap}
-            onClick={() => handleAdd(preview)}
-          >
-            {atCap
-              ? "Max bereikt"
-              : previewPayout
-              ? `Add € ${previewPayout.toFixed(2)}`
-              : "Add"}
-          </Button>
+                  {/* Add button */}
+                  <div className="mt-4 grid place-items-center">
+                    <Button
+                      className="btn-gold font-semibold min-w-[180px]"
+                      disabled={!previewPayout || atCap}
+                      onClick={() => handleAdd(preview)}
+                    >
+                      {atCap
+                        ? "Max bereikt"
+                        : previewPayout
+                        ? `Add € ${previewPayout.toFixed(2)}`
+                        : "Add"}
+                    </Button>
                   </div>
                 </div>
               )}
@@ -643,3 +633,4 @@ const atCap = remaining !== null && remaining <= 0;
     </div>
   );
 }
+

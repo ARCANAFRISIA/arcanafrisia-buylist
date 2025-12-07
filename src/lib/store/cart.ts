@@ -6,6 +6,7 @@ export type CartItem = {
   id: string; // scryfallId
   name: string;
   set: string;
+  collectorNumber?: string | null;
   imageSmall?: string | null;
   cardmarketId?: number | null;
   qty: number;

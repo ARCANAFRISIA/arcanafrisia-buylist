@@ -33,7 +33,10 @@ model PriceGuide {
 model Submission {
   id               String           @id @default(cuid())
   email            String?
-  status           String           @default("RECEIVED")
+  // OUD:
+  // status           String           @default("RECEIVED")
+  // NIEUW:
+  status           String           @default("SUBMITTED")
   subtotalCents    Int
   serverTotalCents Int
   clientTotalCents Int?
@@ -46,10 +49,15 @@ model Submission {
   items            SubmissionItem[]
 }
 
+
 model SubmissionItem {
   id             String     @id @default(cuid())
   submissionId   String
   productId      BigInt
+  collectorNumber String?
+  cardName        String?
+  setCode         String?
+  condition       String?
   isFoil         Boolean    @default(false)
   qty            Int
   trendCents     Int?

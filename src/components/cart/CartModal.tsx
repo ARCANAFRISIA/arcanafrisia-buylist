@@ -90,7 +90,7 @@ export default function CartModal() {
                     <div className="truncate font-medium af-text">{i.name}</div>
                     <div className="text-xs af-muted">
                       {i.set?.toUpperCase()} • {i.condition} •{" "}
-                      {i.foil ? "Foil" : "Non-foil"}
+                      {i.collectorNumber ? ` #${i.collectorNumber}` : ""} • {i.foil ? "Foil" : "Non-foil"}
                     </div>
                     <div className="mt-1 text-xs af-muted">
                       {fmt(i.payout)} × {i.qty} ={" "}

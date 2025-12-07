@@ -1,24 +1,39 @@
+// src/app/admin/layout.tsx
 import Link from "next/link";
+
+const links = [
+  { href: "/admin", label: "Dashboard" },
+  { href: "/admin/submissions", label: "Submissions" },
+  { href: "/admin/tools/apply-sales", label: "Apply Sales" },
+  { href: "/admin/exports/post-sales", label: "Relist & New Stock Export" },
+  { href: "/admin/exports/idle", label: "Idle Export" },
+  { href: "/admin/inventory", label: "Inventory overview" },
+  { href: "/admin/stock-in", label: "Stock in" },
+  { href: "/admin/tools/oversell", label: "Oversell" },
+];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen grid grid-cols-[220px_1fr]">
-      <aside className="border-r p-4 space-y-3">
-        <div className="text-lg font-semibold">Admin</div>
-        <nav className="flex flex-col gap-2 text-sm">
-          <Link href="/admin">Dashboard</Link>
-          <div className="mt-2 font-semibold">Tools</div>
-          <Link href="/admin/tools/apply-sales">Apply Sales</Link>
-          <Link href="/admin/exports/post-sales">Relist & New Stock Export</Link>
-          <Link href="/admin/exports/idle">Idle Export</Link>
-          <Link href="/admin/inventory" className="block hover:text-blue-400">
-            Inventory overview</Link>
-          <Link href="/admin/stock-in">Stock in</Link>
-          <Link href="/admin/tools/oversell">Oversell</Link>
-          {/* voeg later meer items toe */}
+    <div className="min-h-screen flex bg-background text-foreground">
+      {/* Sidebar links */}
+      <aside className="w-52 p-4 border-r border-border bg-card">
+        <nav className="flex flex-col space-y-1 text-sm">
+          {links.map((l) => (
+            <Link
+              key={l.href}
+              href={l.href}
+              className="block rounded-md px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              {l.label}
+            </Link>
+          ))}
         </nav>
       </aside>
-      <main className="p-6">{children}</main>
+
+      {/* Hoofdinhoud */}
+      <main className="flex-1 px-6 py-6 bg-background">
+        {children}
+      </main>
     </div>
   );
 }

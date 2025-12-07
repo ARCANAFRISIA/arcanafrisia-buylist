@@ -7,11 +7,19 @@ type Props = {
   initialStatus: string; // submission.status
 };
 
-const OPTIONS = ["RECEIVED","GRADING","ADJUSTED","APPROVED","REJECTED","PAID"];
+const OPTIONS = [
+  "SUBMITTED",
+  "RECEIVED",
+  "GRADING",
+  "ADJUSTED",
+  "APPROVED",
+  "REJECTED",
+  "PAID",
+];
 
 export default function StatusEditor({ id, initialStatus }: Props) {
   const router = useRouter();
-  const [status, setStatus] = React.useState(initialStatus || "RECEIVED");
+  const [status, setStatus] = React.useState(initialStatus || "SUBMITTED");
   const [message, setMessage] = React.useState("");
   const [saving, setSaving] = React.useState(false);
 
@@ -26,7 +34,6 @@ export default function StatusEditor({ id, initialStatus }: Props) {
       const data = await res.json();
       if (!res.ok || !data?.ok) throw new Error(data?.error || "Opslaan mislukt");
 
-      // ✅ pagina opnieuw renderen zodat status/header direct updaten
       router.refresh();
       setMessage("");
     } catch (e: any) {
@@ -43,7 +50,11 @@ export default function StatusEditor({ id, initialStatus }: Props) {
         value={status}
         onChange={(e) => setStatus(e.target.value)}
       >
-        {OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+        {OPTIONS.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
       </select>
 
       <input

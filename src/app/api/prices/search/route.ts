@@ -5,6 +5,8 @@ export const revalidate = 0;
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { getPendingQtyByCardmarketId } from "@/lib/buylistPending";
+
 
 const norm = (s: string) => s.trim().replace(/\s+/g, " ");
 
@@ -33,6 +35,7 @@ export async function GET(req: Request) {
       tix: true,
       edhrecRank: true,
       gameChanger: true,
+      collectorNumber: true,
     },
     take: 100, // was eerder 20; wat ruimer is prima
   });
@@ -61,8 +64,8 @@ export async function GET(req: Request) {
     });
   }
 
-  // 4) eigen voorraad per cardmarketId ophalen
-  let ownById = new Map<number, number>();
+    // 4) eigen voorraad per cardmarketId ophalen
+    let ownOnHandById = new Map<number, number>();
   if (ids.length) {
     const inv = await prisma.inventoryBalance.groupBy({
       where: { cardmarketId: { in: ids } },
@@ -70,7 +73,7 @@ export async function GET(req: Request) {
       _sum: { qtyOnHand: true },
     });
 
-    ownById = new Map(
+    ownOnHandById = new Map(
       inv.map((row) => [
         row.cardmarketId as number,
         row._sum.qtyOnHand ?? 0,
@@ -78,17 +81,34 @@ export async function GET(req: Request) {
     );
   }
 
+
+
+  // 4b) pending buylist-qty per cardmarketId ophalen
+  const pendingById = ids.length
+    ? await getPendingQtyByCardmarketId(ids)
+    : new Map<number, number>();
+
+
+  console.log("SEARCH PENDING DEBUG", {
+    ids,
+    pendingEntries: Array.from(pendingById.entries()).slice(0, 10),
+  });
+
+
+
   // 5) response opbouwen – client rekent zelf payout met de engine
   const items = rows.map((r) => {
     const cmId = r.cardmarketId ?? null;
     const meta = cmId != null ? byId.get(cmId) : undefined;
-    const ownQty = cmId != null ? ownById.get(cmId) ?? 0 : 0;
+        const ownOnHand = cmId != null ? ownOnHandById.get(cmId) ?? 0 : 0;
+    const qtyPending = cmId != null ? pendingById.get(cmId) ?? 0 : 0;
+    const ownQtyTotal = ownOnHand + qtyPending;
 
     let maxBuy: number | null = null;
     const baseTrend = meta?.trend ?? null;
     if (cmId != null && baseTrend != null && baseTrend > 0) {
       const baseCap = baseTrend >= 100 ? 4 : 8; // dure kaarten lagere cap
-      maxBuy = Math.max(baseCap - ownQty, 0);
+      maxBuy = Math.max(baseCap - ownQtyTotal, 0);
     }
 
     return {
@@ -101,12 +121,19 @@ export async function GET(req: Request) {
       trend: meta?.trend ?? null,
       trendFoil: meta?.trendFoil ?? null,
       rarity: r.rarity,
-      ownQty,
+      collectorNumber: r.collectorNumber,
+
+      // nieuw:
+      ownQtyOnHand: ownOnHand,
+      qtyPending,
+      ownQty: ownQtyTotal,
+
       maxBuy,
       tix: decToNum(r.tix),
       edhrecRank: r.edhrecRank,
       gameChanger: r.gameChanger ?? false,
     };
+
   });
 
   return NextResponse.json({ items });

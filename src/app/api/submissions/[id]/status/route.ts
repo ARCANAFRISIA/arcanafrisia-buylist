@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { sendMail, euro } from "@/lib/mail";
 
-const ALLOWED = new Set(["RECEIVED","GRADING","ADJUSTED","APPROVED","REJECTED","PAID"]);
+const ALLOWED = new Set(["SUBMITTED","RECEIVED","GRADING","ADJUSTED","APPROVED","REJECTED","PAID"]);
 
 function appendEvent(metaText: string | null | undefined, evt: any): string {
   let arr: any[] = [];
@@ -24,10 +24,10 @@ function jsonSafe<T>(obj: T): T {
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  ctx: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = String(params.id);
+    const { id } = await ctx.params;
     const body = await req.json();
     const status = String(body?.status || "").toUpperCase();
     const message: string | undefined = body?.message || undefined;
@@ -64,6 +64,7 @@ export async function PATCH(
           updated.items.reduce((s, i) => s + Number(i.lineCents ?? 0), 0);
 
         const subjectMap: Record<string,string> = {
+          SUBMITTED: `Buylist ingediend – ${updated.id}`,
           RECEIVED: `We hebben je buylist ontvangen – ${updated.id}`,
           GRADING:  `We beoordelen je kaarten – ${updated.id}`,
           ADJUSTED: `Prijs aangepast – ${updated.id}`,
@@ -72,6 +73,7 @@ export async function PATCH(
           PAID:     `Uitbetaald – ${updated.id}`,
         };
         const bodyMap: Record<string,string> = {
+          SUBMITTED: `<p>Je buylist is ingediend. Zodra we je kaarten fysiek ontvangen, updaten we de status.<br/>Referentie: <strong>${updated.id}</strong>.</p>`,
           RECEIVED: `<p>Bedankt! We hebben je buylist ontvangen. Referentie: <strong>${updated.id}</strong>.<br/>Totaal (indicatief): <strong>${euro(totalCents)}</strong>.</p>`,
           GRADING:  `<p>We zijn je kaarten aan het beoordelen (conditie/telling). Referentie: <strong>${updated.id}</strong>.</p>`,
           ADJUSTED: `<p>We hebben je totaal aangepast. ${message ? `Toelichting: ${message}` : ""}<br/>Nieuw totaal (indicatief): <strong>${euro(totalCents)}</strong>.</p>`,
