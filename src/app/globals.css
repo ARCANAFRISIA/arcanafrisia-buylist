@@ -162,10 +162,23 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    /* Gebruik Geist als basis-sans font */
+    font-family: var(--font-geist-sans), system-ui, -apple-system,
+      BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  /* Mono font voor code/textarea etc. */
+  code,
+  pre,
+  textarea {
+    font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular,
+      Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   }
 }
+
 
 /* === AF helpers voor de buylist (gebruikt alleen eigen variabelen) === */
 :root {

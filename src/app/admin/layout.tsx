@@ -1,5 +1,5 @@
-// src/app/admin/layout.tsx
 import Link from "next/link";
+import { PageContainer } from "@/components/layout/page-container"; // ⬅️ nieuw
 
 const links = [
   { href: "/admin", label: "Dashboard" },
@@ -31,8 +31,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </aside>
 
       {/* Hoofdinhoud */}
-      <main className="flex-1 px-6 py-6 bg-background">
-        {children}
+      <main className="flex-1 py-6">
+        <PageContainer>
+          {children}
+        </PageContainer>
       </main>
     </div>
   );

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import CartModal from "@/components/cart/CartModal";
 import { computeUnitFromTrend, type CondKey } from "@/lib/buylistEngineCore";
 import BuyHeader from "@/components/buy/BuyHeader";
+import { PageContainer } from "@/components/layout/page-container";
 
 
 const GOLD = "#C9A24E";
@@ -384,7 +385,8 @@ export default function BuyListUploadPage() {
       }}
     >
       <BuyHeader />
-      <main className="mx-auto w-full max-w-[1200px] px-6 lg:px-12 pb-16 pt-10">
+      <main className="mx-auto w-full max-w-[1200px] px-6 lg:px-12 pb-16 pt-10 space-y-8">
+
         {/* header */}
         <div className="flex items-center justify-between gap-4 mb-6">
           <div>
