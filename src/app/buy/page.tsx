@@ -17,6 +17,18 @@ const GOLD = "#C9A24E";
 /** ---- Types ---- */
 type Condition = "NM" | "EX" | "GD" | "PL" | "PO";
 
+type FormatOption =
+  | ""
+  | "Standard"
+  | "Pioneer"
+  | "Modern"
+  | "Legacy"
+  | "Vintage"
+  | "Premodern"
+  | "Pauper"
+  | "Commander";
+
+
 type Item = {
   id: string;
   name: string;
@@ -520,7 +532,7 @@ const visible = useMemo(() => {
                 </label>
                 <select
                   value={selectedFormat}
-                  onChange={(e) => setSelectedFormat(e.target.value)}
+                  onChange={(e) => setSelectedFormat(e.target.value as FormatOption)}
                   className="h-8 w-full rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-xs af-text"
                 >
                   <option value="Standard">Standard</option>
