@@ -15,11 +15,21 @@ type SFResp = {
   collector_number?: string;
   lang?: string;
   image_uris?: { small?: string; normal?: string };
+
+  // ➕ voor DFC / modal etc.
+  card_faces?: {
+    image_uris?: { small?: string; normal?: string };
+  }[];
+
+  // ➕ rarity komt gewoon mee van Scryfall
+  rarity?: string;
+
   prices?: { usd?: string | null; eur?: string | null; tix?: string | null };
   edhrec_rank?: number;
   legalities?: Record<string, string>;
   game_changer?: boolean;
 };
+
 
 type FetchOk = { ok: true; data: SFResp };
 type FetchErr = { ok: false; code: number };
@@ -97,54 +107,83 @@ export async function GET(req: Request) {
 
       const data = r.data;
 
+      const { imgSmall, imgNormal } = extractImages(data);
+const rarity = data.rarity ?? null; // eventueel .toLowerCase() als je dat wilt
+
+
+      function extractImages(data: SFResp) {
+  const imgSmall =
+    data.image_uris?.small ??
+    data.card_faces?.[0]?.image_uris?.small ??
+    null;
+
+  const imgNormal =
+    data.image_uris?.normal ??
+    data.card_faces?.[0]?.image_uris?.normal ??
+    null;
+
+  return { imgSmall, imgNormal };
+}
+
+
       await prisma.scryfallLookup.upsert({
         where: { cardmarketId: job.cardmarketId },
         create: {
-          cardmarketId: job.cardmarketId,
-          scryfallId: data.id,
-          oracleId: data.oracle_id ?? null,
-          name: data.name,
-          set: data.set,
-          collectorNumber: data.collector_number ?? null,
-          lang: data.lang ?? null,
-          imageSmall: data.image_uris?.small ?? null,
-          imageNormal: data.image_uris?.normal ?? null,
-          rarity: null,
-          usd: parsePrice(data.prices?.usd) ?? null,
-          eur: parsePrice(data.prices?.eur) ?? null,
-          tix: parsePrice(data.prices?.tix) ?? null,
-          edhrecRank: data.edhrec_rank ?? null,
-          legalities: {
-  set:
-    data.legalities !== undefined && data.legalities !== null
-      ? (data.legalities as Prisma.JsonValue)
-      : null
+  cardmarketId: job.cardmarketId,
+  scryfallId: data.id,
+  oracleId: data.oracle_id ?? null,
+  name: data.name,
+  set: data.set,
+  collectorNumber: data.collector_number ?? null,
+  lang: data.lang ?? null,
+
+  // ✅ DFC / images fix
+  imageSmall: imgSmall,
+  imageNormal: imgNormal,
+
+  // ✅ rarity vullen
+  rarity,
+
+  usd: parsePrice(data.prices?.usd) ?? null,
+  eur: parsePrice(data.prices?.eur) ?? null,
+  tix: parsePrice(data.prices?.tix) ?? null,
+  edhrecRank: data.edhrec_rank ?? null,
+  legalities: {
+    set:
+      data.legalities !== undefined && data.legalities !== null
+        ? (data.legalities as Prisma.JsonValue)
+        : null,
+  },
+  gameChanger: data.game_changer ?? null,
+},
+update: {
+  scryfallId: data.id,
+  oracleId: data.oracle_id ?? null,
+  name: data.name,
+  set: data.set,
+  collectorNumber: data.collector_number ?? null,
+  lang: data.lang ?? null,
+
+  // ✅ DFC / images fix
+  imageSmall: imgSmall,
+  imageNormal: imgNormal,
+
+  // ✅ rarity ook bij updates
+  rarity,
+
+  usd: parsePrice(data.prices?.usd) ?? null,
+  eur: parsePrice(data.prices?.eur) ?? null,
+  tix: parsePrice(data.prices?.tix) ?? null,
+  edhrecRank: data.edhrec_rank ?? null,
+  legalities: {
+    set:
+      data.legalities !== undefined && data.legalities !== null
+        ? (data.legalities as Prisma.JsonValue)
+        : null,
+  },
+  gameChanger: data.game_changer ?? null,
 },
 
-          gameChanger: data.game_changer ?? null,
-        },
-        update: {
-          scryfallId: data.id,
-          oracleId: data.oracle_id ?? null,
-          name: data.name,
-          set: data.set,
-          collectorNumber: data.collector_number ?? null,
-          lang: data.lang ?? null,
-          imageSmall: data.image_uris?.small ?? null,
-          imageNormal: data.image_uris?.normal ?? null,
-          usd: parsePrice(data.prices?.usd) ?? null,
-          eur: parsePrice(data.prices?.eur) ?? null,
-          tix: parsePrice(data.prices?.tix) ?? null,
-          edhrecRank: data.edhrec_rank ?? null,
-          legalities: {
-  set:
-    data.legalities !== undefined && data.legalities !== null
-      ? (data.legalities as Prisma.JsonValue)
-      : null
-},
-
-          gameChanger: data.game_changer ?? null,
-        },
       });
 
       return { del: true, ok: true, jobId: job.id };
