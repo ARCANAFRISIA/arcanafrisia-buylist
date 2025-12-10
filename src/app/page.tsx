@@ -600,7 +600,7 @@ return out;
                 </div>
                 <p className="af-muted text-[14px] leading-snug">
                   Combineer set, formaat, rarity en prijs om snel de juiste
-                  kaartversie te vinden.
+                  kaartversie te vinden. Geen uitbetaling? check foil.
                 </p>
               </div>
 
@@ -830,238 +830,342 @@ return out;
   )}
 
 
-              {/* LIST VIEW */}
-              {view === "list" && (
-                <div className="mt-2 grid gap-6 grid-cols-[minmax(0,1fr)_380px] items-start">
-                  {/* LEFT: list */}
-                  <div className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--bg2)]">
-                    {visible.map((it) => {
-                      const isActive = preview?.id === it.id;
-                      const pref = getPref(it.id);
-                      const payout = computeClientPayout(it, pref);
-                      const remaining = remainingCapForItem(it, cart);
-                      const atCap = remaining !== null && remaining <= 0;
+{/* LIST VIEW */}
+{view === "list" && (
+  <>
+    {/* MOBILE LIST (zonder sticky preview) */}
+    <div className="mt-2 space-y-2 md:hidden">
+      {visible.map((it) => {
+        const pref = getPref(it.id);
+        const payout = computeClientPayout(it, pref);
+        const remaining = remainingCapForItem(it, cart);
+        const atCap = remaining !== null && remaining <= 0;
 
-                      return (
-                        <div
-                          key={it.id}
-                          className="group flex items-center gap-4 px-4 py-3 hover:bg-[#102033] cursor-pointer"
-                          onMouseEnter={() => {
-                            setPreview(it);
-                          }}
-                          tabIndex={0}
-                        >
-                          <div
-                            className={[
-                              "grid h-12 w-9 flex-none place-items-center overflow-hidden rounded border",
-                              isActive
-                                ? "border-[#3A5172] ring-2 ring-[#3A5172]"
-                                : "border-[var(--border)]",
-                              "bg-black/30",
-                            ].join(" ")}
-                            aria-hidden="true"
-                          >
-                            {it.imageSmall || it.imageNormal ? (
-                              <Image
-                                src={it.imageSmall || it.imageNormal!}
-                                alt={it.name}
-                                width={36}
-                                height={48}
-                                className="object-contain"
-                              />
-                            ) : null}
-                          </div>
+        return (
+          <div
+            key={it.id}
+            className="flex gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg2)] p-3"
+          >
+            {/* Thumbnail */}
+            <div className="h-16 w-12 flex-none overflow-hidden rounded border border-[var(--border)] bg-black/30 grid place-items-center">
+              {it.imageSmall || it.imageNormal ? (
+                <Image
+                  src={it.imageSmall || it.imageNormal!}
+                  alt={it.name}
+                  width={48}
+                  height={64}
+                  className="object-contain"
+                />
+              ) : null}
+            </div>
 
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-base font-medium af-text">
-                              {it.name}
-                            </div>
-                            <div className="text-xs af-muted mt-[2px]">
-                              {it.set?.toUpperCase()}
-                              {it.collectorNumber
-                                ? ` #${it.collectorNumber}`
-                                : ""}
-                              {it.rarity && (
-                                <span
-                                  className={`ml-1 px-2 py-[1px] text-[10px] rounded ${rarityClass(
-                                    it.rarity
-                                  )}`}
-                                >
-                                  {it.rarity}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="ml-auto flex items-center gap-2">
-                            {payout ? (
-                              <div
-                                className="tabular-nums text-lg font-semibold mr-1"
-                                style={{ color: GOLD }}
-                              >
-                                € {payout.toFixed(2)}
-                              </div>
-                            ) : (
-                              <div className="text-xs af-muted mr-1">—</div>
-                            )}
-
-                            <div className="hidden sm:block text-[10px] af-muted text-right mr-1">
-                              {pref.condition}
-                              {pref.foil ? " • Foil" : ""}
-                            </div>
-
-                            <select
-                              value={pref.condition}
-                              onChange={(e) =>
-                                setPrefCond(
-                                  it.id,
-                                  e.target.value as Condition
-                                )
-                              }
-                              className="h-7 rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-xs af-text"
-                              title="Conditie"
-                              onClick={(e) => e.stopPropagation()}
-                              onMouseDown={(e) => e.stopPropagation()}
-                            >
-                              <option value="NM">NM</option>
-                              <option value="EX">EX</option>
-                              <option value="GD">GD</option>
-                              <option value="PL">PL</option>
-                              <option value="PO">PO</option>
-                            </select>
-
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                togglePrefFoil(it.id);
-                              }}
-                              className={[
-                                "h-7 rounded-full px-3 text-xs font-medium border",
-                                pref.foil
-                                  ? "border-[#2F415B] bg-[#2A3A52] text-white"
-                                  : "border-[var(--border)] bg-[var(--bg2)] af-text",
-                              ].join(" ")}
-                              title="Foil togglen"
-                            >
-                              {pref.foil ? "Foil ✓" : "Foil"}
-                            </button>
-
-                            <Button
-                              size="sm"
-                              disabled={!payout || atCap}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleAdd(it);
-                              }}
-                              className="btn-gold font-semibold px-3 py-1.5"
-                            >
-                              {atCap
-                                ? "Max bereikt"
-                                : payout
-                                ? `Add € ${payout.toFixed(2)}`
-                                : "Add"}
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* RIGHT: sticky preview */}
-                  <aside className="block md:sticky md:top-24 rounded-xl border border-[var(--border)] bg-[var(--bg2)] p-4 h-[560px]">
-                    {!preview || !previewPref ? (
-                      <div className="h-full grid place-items-center af-muted text-sm">
-                        Hover een kaart in de lijst voor een grote preview
-                      </div>
-                    ) : (
-                      <div className="h-full w-full">
-                        <div className="text-base font-semibold mb-1 af-text">
-                          {preview.name}
-                        </div>
-                        <div className="text-xs af-muted mb-3">
-                          {preview.set?.toUpperCase()}
-                          {preview.collectorNumber
-                            ? ` #${preview.collectorNumber}`
-                            : ""}
-                        </div>
-
-                        <div
-                          className="mx-auto rounded border border-[var(--border)] bg-black/30 w-[280px] h-[420px] bg-no-repeat bg-center bg-contain shadow-[0_10px_30px_rgba(0,0,0,.35)]"
-                          style={{
-                            backgroundImage: `url("${
-                              (preview.imageNormal || preview.imageSmall) ?? ""
-                            }")`,
-                          }}
-                        />
-
-                        {previewPayout ? (
-                          <div
-                            className="mt-3 text-center text-xl font-bold"
-                            style={{ color: GOLD }}
-                          >
-                            € {previewPayout.toFixed(2)}
-                          </div>
-                        ) : (
-                          <div className="mt-3 text-center text-xs af-muted">
-                            Geen payout
-                          </div>
-                        )}
-
-                        <div className="mt-4 flex items-center justify-center gap-3">
-                          <select
-                            value={previewPref.condition}
-                            onChange={(e) =>
-                              setPrefCond(
-                                preview.id,
-                                e.target.value as Condition
-                              )
-                            }
-                            className="h-9 rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-sm af-text"
-                            title="Conditie"
-                          >
-                            <option value="NM">NM</option>
-                            <option value="EX">EX</option>
-                            <option value="GD">GD</option>
-                            <option value="PL">PL</option>
-                            <option value="PO">PO</option>
-                          </select>
-
-                          <button
-                            type="button"
-                            onClick={() => togglePrefFoil(preview.id)}
-                            className={[
-                              "h-9 rounded-full px-3 text-sm font-medium border",
-                              previewPref.foil
-                                ? "border-[#2F415B] bg-[#2A3A52] text-white"
-                                : "border-[var(--border)] bg-[var(--bg2)] af-text",
-                            ].join(" ")}
-                            title="Foil togglen"
-                          >
-                            {previewPref.foil ? "Foil ✓" : "Foil"}
-                          </button>
-                        </div>
-
-                        <div className="mt-4 grid place-items-center">
-                          <Button
-                            className="btn-gold font-semibold min-w-[180px]"
-                            disabled={!previewPayout || previewAtCap}
-                            onClick={() => handleAdd(preview)}
-                          >
-                            {previewAtCap
-                              ? "Max bereikt"
-                              : previewPayout
-                              ? `Add € ${previewPayout.toFixed(2)}`
-                              : "Add"}
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </aside>
+            {/* Info + controls */}
+            <div className="min-w-0 flex-1 flex flex-col gap-2">
+              <div>
+                <div className="text-sm font-medium af-text line-clamp-2">
+                  {it.name}
                 </div>
-              )}
-            </section>
+                <div className="mt-[2px] text-[11px] af-muted">
+                  {it.set?.toUpperCase()}
+                  {it.collectorNumber ? ` #${it.collectorNumber}` : ""}
+                  {it.rarity && (
+                    <span
+                      className={`ml-1 px-2 py-[1px] text-[10px] rounded ${rarityClass(
+                        it.rarity
+                      )}`}
+                    >
+                      {it.rarity}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 justify-between">
+                {payout ? (
+                  <div
+                    className="tabular-nums text-base font-semibold"
+                    style={{ color: GOLD }}
+                  >
+                    € {payout.toFixed(2)}
+                  </div>
+                ) : (
+                  <div className="text-xs af-muted">Geen payout</div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={pref.condition}
+                    onChange={(e) =>
+                      setPrefCond(it.id, e.target.value as Condition)
+                    }
+                    className="h-7 rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-xs af-text"
+                    title="Conditie"
+                  >
+                    <option value="NM">NM</option>
+                    <option value="EX">EX</option>
+                    <option value="GD">GD</option>
+                    <option value="PL">PL</option>
+                    <option value="PO">PO</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => togglePrefFoil(it.id)}
+                    className={[
+                      "h-7 rounded-full px-3 text-xs font-medium border",
+                      pref.foil
+                        ? "border-[#2F415B] bg-[#2A3A52] text-white"
+                        : "border-[var(--border)] bg-[var(--bg2)] af-text",
+                    ].join(" ")}
+                    title="Foil togglen"
+                  >
+                    {pref.foil ? "Foil ✓" : "Foil"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Add button – niet meer full-width */}
+              <Button
+                size="sm"
+                disabled={!payout || atCap}
+                onClick={() => handleAdd(it)}
+                className="btn-gold font-semibold px-4 py-1.5 w-auto self-start"
+              >
+                {atCap
+                  ? "Max bereikt"
+                  : payout
+                  ? `Add € ${payout.toFixed(2)}`
+                  : "Add"}
+              </Button>
+            </div>
           </div>
+        );
+      })}
+    </div>
+
+     {/* DESKTOP LIST + STICKY PREVIEW (zoals oude versie) */}
+<div className="mt-2 hidden md:flex md:items-start md:gap-6 md:justify-between">
+  {/* LEFT: list */}
+  <div className="w-full md:max-w-[900px] flex-1 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--bg2)]">
+        {visible.map((it) => {
+          const isActive = preview?.id === it.id;
+          const pref = getPref(it.id);
+          const payout = computeClientPayout(it, pref);
+          const remaining = remainingCapForItem(it, cart);
+          const atCap = remaining !== null && remaining <= 0;
+
+          return (
+            <div
+              key={it.id}
+              className="group flex items-center gap-4 px-4 py-3 hover:bg-[#102033] cursor-pointer"
+              onMouseEnter={() => {
+                setPreview(it);
+              }}
+              tabIndex={0}
+            >
+              <div
+                className={[
+                  "grid h-12 w-9 flex-none place-items-center overflow-hidden rounded border",
+                  isActive
+                    ? "border-[#3A5172] ring-2 ring-[#3A5172]"
+                    : "border-[var(--border)]",
+                  "bg-black/30",
+                ].join(" ")}
+                aria-hidden="true"
+              >
+                {it.imageSmall || it.imageNormal ? (
+                  <Image
+                    src={it.imageSmall || it.imageNormal!}
+                    alt={it.name}
+                    width={36}
+                    height={48}
+                    className="object-contain"
+                  />
+                ) : null}
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-base font-medium af-text">
+                  {it.name}
+                </div>
+                <div className="text-xs af-muted mt-[2px]">
+                  {it.set?.toUpperCase()}
+                  {it.collectorNumber ? ` #${it.collectorNumber}` : ""}
+                  {it.rarity && (
+                    <span
+                      className={`ml-1 px-2 py-[1px] text-[10px] rounded ${rarityClass(
+                        it.rarity
+                      )}`}
+                    >
+                      {it.rarity}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="ml-auto flex items-center gap-2">
+                {payout ? (
+                  <div
+                    className="tabular-nums text-lg font-semibold mr-1"
+                    style={{ color: GOLD }}
+                  >
+                    € {payout.toFixed(2)}
+                  </div>
+                ) : (
+                  <div className="text-xs af-muted mr-1">—</div>
+                )}
+
+                <div className="hidden sm:block text-[10px] af-muted text-right mr-1">
+                  {pref.condition}
+                  {pref.foil ? " • Foil" : ""}
+                </div>
+
+                <select
+                  value={pref.condition}
+                  onChange={(e) =>
+                    setPrefCond(it.id, e.target.value as Condition)
+                  }
+                  className="h-7 rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-xs af-text"
+                  title="Conditie"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <option value="NM">NM</option>
+                  <option value="EX">EX</option>
+                  <option value="GD">GD</option>
+                  <option value="PL">PL</option>
+                  <option value="PO">PO</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    togglePrefFoil(it.id);
+                  }}
+                  className={[
+                    "h-7 rounded-full px-3 text-xs font-medium border",
+                    pref.foil
+                      ? "border-[#2F415B] bg-[#2A3A52] text-white"
+                      : "border-[var(--border)] bg-[var(--bg2)] af-text",
+                  ].join(" ")}
+                  title="Foil togglen"
+                >
+                  {pref.foil ? "Foil ✓" : "Foil"}
+                </button>
+
+                <Button
+                  size="sm"
+                  disabled={!payout || atCap}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleAdd(it);
+                  }}
+                  className="btn-gold font-semibold px-3 py-1.5"
+                >
+                  {atCap
+                    ? "Max bereikt"
+                    : payout
+                    ? `Add € ${payout.toFixed(2)}`
+                    : "Add"}
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* RIGHT: sticky preview */}
+        <aside className="w-[380px] shrink-0 md:sticky md:top-24 rounded-xl border border-[var(--border)] bg-[var(--bg2)] p-4 h-[560px]">
+        {!preview || !previewPref ? (
+          <div className="h-full grid place-items-center af-muted text-sm">
+            Hover een kaart in de lijst voor een grote preview
+          </div>
+        ) : (
+          <div className="h-full w-full">
+            <div className="text-base font-semibold mb-1 af-text">
+              {preview.name}
+            </div>
+            <div className="text-xs af-muted mb-3">
+              {preview.set?.toUpperCase()}
+              {preview.collectorNumber ? ` #${preview.collectorNumber}` : ""}
+            </div>
+
+            <div
+              className="mx-auto rounded border border-[var(--border)] bg-black/30 w-[280px] h-[420px] bg-no-repeat bg-center bg-contain shadow-[0_10px_30px_rgba(0,0,0,.35)]"
+              style={{
+                backgroundImage: `url("${
+                  (preview.imageNormal || preview.imageSmall) ?? ""
+                }")`,
+              }}
+            />
+
+            {previewPayout ? (
+              <div
+                className="mt-3 text-center text-xl font-bold"
+                style={{ color: GOLD }}
+              >
+                € {previewPayout.toFixed(2)}
+              </div>
+            ) : (
+              <div className="mt-3 text-center text-xs af-muted">
+                Geen payout
+              </div>
+            )}
+
+            <div className="mt-4 flex items-center justify-center gap-3">
+              <select
+                value={previewPref.condition}
+                onChange={(e) =>
+                  setPrefCond(preview.id, e.target.value as Condition)
+                }
+                className="h-9 rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-sm af-text"
+                title="Conditie"
+              >
+                <option value="NM">NM</option>
+                <option value="EX">EX</option>
+                <option value="GD">GD</option>
+                <option value="PL">PL</option>
+                <option value="PO">PO</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={() => togglePrefFoil(preview.id)}
+                className={[
+                  "h-9 rounded-full px-3 text-sm font-medium border",
+                  previewPref.foil
+                    ? "border-[#2F415B] bg-[#2A3A52] text-white"
+                    : "border-[var(--border)] bg-[var(--bg2)] af-text",
+                ].join(" ")}
+                title="Foil togglen"
+              >
+                {previewPref.foil ? "Foil ✓" : "Foil"}
+              </button>
+            </div>
+
+            <div className="mt-4 grid place-items-center">
+              <Button
+                className="btn-gold font-semibold min-w-[180px]"
+                disabled={!previewPayout || previewAtCap}
+                onClick={() => handleAdd(preview)}
+              >
+                {previewAtCap
+                  ? "Max bereikt"
+                  : previewPayout
+                  ? `Add € ${previewPayout.toFixed(2)}`
+                  : "Add"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </aside>
+    </div>
+</>
+)}
+
+</section>
+</div>
 
           <BackToTopButton />
         </PageContainer>
@@ -1096,7 +1200,7 @@ function BackToTopButton() {
       style={{
         position: "fixed",
         bottom: "24px",      // iets lager kan ook: "32px"
-        right: "16px",       // aan rechterkant van de content
+        right: "28px",       // aan rechterkant van de content
         backgroundColor: "#050910",
         color: "#F9FAFB",
         padding: "8px 14px",
