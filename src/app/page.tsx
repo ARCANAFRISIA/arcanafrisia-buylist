@@ -12,6 +12,9 @@ import { computeUnitFromTrend, type CondKey } from "@/lib/buylistEngineCore";
 import BuyHeader from "@/components/buy/BuyHeader";
 import { PageContainer } from "@/components/layout/page-container";
 
+
+
+
 const GOLD = "#C9A24E";
 
 /** ---- Types ---- */
@@ -75,6 +78,9 @@ function computeClientPayout(
   if (it.cardmarketId == null) return null;
   if (it.trend == null && it.trendFoil == null) return null;
 
+
+
+
   const condKey = conditionToCondKey(pref.condition);
 
   const { unit, allowed } = computeUnitFromTrend({
@@ -92,6 +98,38 @@ function computeClientPayout(
 
   if (!allowed || unit <= 0) return null;
   return unit;
+}
+
+  const CONDITIONS: Condition[] = ["NM", "EX", "GD", "PL", "PO"];
+
+function itemIsBuyable(it: Item): boolean {
+  if (it.cardmarketId == null && it.trend == null && it.trendFoil == null) {
+    return false;
+  }
+
+  for (const cond of CONDITIONS) {
+    for (const foil of [false, true]) {
+      const { unit, allowed } = computeUnitFromTrend({
+        trend: it.trend,
+        trendFoil: it.trendFoil,
+        isFoil: foil,
+        cond: conditionToCondKey(cond),
+        ctx: {
+          ownQty: it.ownQty ?? 0,
+          edhrecRank: it.edhrecRank ?? null,
+          mtgoTix: it.tix ?? null,
+          gameChanger: it.gameChanger ?? null,
+        },
+      });
+
+      if (allowed && unit > 0) {
+        // voor minstens één variant betalen we
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 // simpele popularity-score voor sort "Most popular"
@@ -139,6 +177,9 @@ export default function BuyPage() {
 
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
+
+  const [onlyBuyable, setOnlyBuyable] = useState(false);
+
 
   // mobiel filters inklappen
   const [showFiltersMobile, setShowFiltersMobile] = useState(false);
@@ -219,6 +260,22 @@ export default function BuyPage() {
     preview && previewPref ? computeClientPayout(preview, previewPref) : null;
   const previewRemaining = preview ? remainingCapForItem(preview, cart) : null;
   const previewAtCap = previewRemaining !== null && previewRemaining <= 0;
+
+  
+
+// centrale reset-functie
+const resetFilters = () => {
+  setQ("");
+  setSelectedSet("");
+  setSelectedFormat("Standard");
+  setSelectedRarity("");
+  setPriceMin("");
+  setPriceMax("");
+  setSort("popular");
+  setShowFiltersMobile(false);
+};
+
+
 
   // ✅ API FETCH — Live Query Search (query + filters naar backend)
   useEffect(() => {
@@ -344,6 +401,11 @@ const visible = useMemo(() => {
     }
   }
 
+  // alleen inkoopbare kaarten tonen?
+if (onlyBuyable) {
+  out = out.filter(itemIsBuyable);
+}
+
     // sort
     out.sort((a, b) => {
       switch (sort) {
@@ -370,11 +432,35 @@ const visible = useMemo(() => {
       }
     });
 
-    return out;
-  }, [items, dq, selectedFormat, priceMin, priceMax, sort]);
+return out;
+}, [
+  items,
+  dq,
+  selectedSet,
+  selectedRarity,
+  selectedFormat,
+  priceMin,
+  priceMax,
+  sort,
+  onlyBuyable,
+]);
+
 
 
   const totalResults = visible.length;
+
+  const handleSetChange = (value: string) => {
+  setSelectedSet(value);
+
+  if (value) {
+    // gebruiker kiest bewust een set -> formats niet beperken
+    setSelectedFormat("");
+  } else {
+    // geen set meer gekozen -> terug naar default
+    setSelectedFormat("Standard");
+  }
+};
+
 
   // ---------- JSX ----------
   return (
@@ -404,12 +490,24 @@ const visible = useMemo(() => {
 
           {/* SEARCH + VIEW + SORT */}
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <Input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Zoek op kaartnaam (optioneel)…"
-              className="h-16 text-base af-card border px-4 af-text placeholder:af-muted focus-visible:ring-0"
-            />
+           <Input
+  value={q}
+  onChange={(e) => setQ(e.target.value)}
+  placeholder="Zoek op kaartnaam (optioneel)…"
+  className="
+    af-card border af-text placeholder:af-muted
+    focus-visible:ring-0
+    rounded-full
+    shadow-[0_0_0_1px_rgba(0,0,0,0.6)]
+  "
+  style={{
+    height: "3.4rem",        // hoger → ~54px
+    fontSize: "1rem",        // net boven standaard
+    paddingInline: "1rem",   // wat meer ruimte links/rechts
+    borderColor: "#C9A24E",  // subtiele gouden rand
+  }}
+/>
+
 
             <div className="flex items-center justify-end gap-3">
               {/* Sort dropdown */}
@@ -512,10 +610,10 @@ const visible = useMemo(() => {
                   Set / Edition
                 </label>
                 <select
-                  value={selectedSet}
-                  onChange={(e) => setSelectedSet(e.target.value)}
-                  className="h-8 w-full rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-xs af-text"
-                >
+  value={selectedSet}
+  onChange={(e) => handleSetChange(e.target.value)}
+  className="h-8 w-full rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-xs af-text"
+>
                   <option value="">Alle sets</option>
                   {setOptions.map((s) => (
                     <option key={s.code} value={s.code.toLowerCase()}>
@@ -592,12 +690,27 @@ const visible = useMemo(() => {
                 </div>
               </div>
 
+              <div className="pt-1 flex flex-col gap-2">
+
+
+  <label className="inline-flex items-center gap-2 text-[13px] af-text">
+    <input
+      type="checkbox"
+      checked={onlyBuyable}
+      onChange={(e) => setOnlyBuyable(e.target.checked)}
+      className="h-3 w-3 rounded border-[var(--border)] bg-[var(--bg2)]"
+    />
+    <span>Alleen kaarten die wij inkopen</span>
+  </label>
+</div>
+
+
             <div className="pt-1 flex justify-between gap-2">
   <button
     type="button"
     onClick={() => {
       setSelectedSet("");
-      setSelectedFormat("Standard");
+      setSelectedFormat("");
       setSelectedRarity("");
       setPriceMin("");
       setPriceMax("");
@@ -949,8 +1062,63 @@ const visible = useMemo(() => {
               )}
             </section>
           </div>
+
+          <BackToTopButton />
         </PageContainer>
       </main>
     </div>
   );
 }
+
+
+
+function BackToTopButton() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => {
+      // wanneer de knop verschijnt (px vanaf boven)
+      setVisible(window.scrollY > 250);
+    };
+
+    window.addEventListener("scroll", onScroll);
+    onScroll(); // meteen één keer runnen
+
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  if (!visible) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+      style={{
+        position: "fixed",
+        bottom: "24px",      // iets lager kan ook: "32px"
+        right: "16px",       // aan rechterkant van de content
+        backgroundColor: "#050910",
+        color: "#F9FAFB",
+        padding: "8px 14px",
+        borderRadius: "9999px",
+        zIndex: 999999,      // boven alles
+        border: "1px solid #C9A24E",
+        boxShadow: "0 10px 25px rgba(0,0,0,0.65)",
+        fontSize: "11px",
+        fontWeight: 600,
+        letterSpacing: "0.03em",
+        cursor: "pointer",
+      }}
+      aria-label="Terug naar boven"
+    >
+      ↑ Naar boven
+    </button>
+  );
+}
+
+
+
+
+
+
+

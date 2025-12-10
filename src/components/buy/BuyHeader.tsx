@@ -125,23 +125,25 @@ export default function BuyHeader() {
 
         <style jsx>{`
           .af-header {
-            width: 100%;
-            background-color: #050910;
-            border-bottom: 1px solid #111827;
-            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
-          }
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 40; /* boven content, onder modals */
+    width: 100%;
+    background-color: #050910;
+    border-bottom: 1px solid #111827;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+  }
 
-          
-
-          .af-inner {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 1.75rem;
-            height: 56px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-          }
+  .af-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 1.75rem;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
 
           .af-left {
             display: flex;
