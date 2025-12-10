@@ -74,8 +74,18 @@ export function customerConfirmationHtml(args: {
   email: string;
   totalCents: number;
   items: Array<{ name: string; qty: number; unitCents: number; lineCents: number }>;
+  shippingMethod?: "SELF" | "LABEL";
+  labelFree?: boolean;
 }) {
-  const { submissionId, email, totalCents, items } = args;
+  const {
+    submissionId,
+    email,
+    totalCents,
+    items,
+    shippingMethod,
+    labelFree,
+  } = args;
+
 
   const rows = items
     .map(
@@ -89,11 +99,69 @@ export function customerConfirmationHtml(args: {
     )
     .join("");
 
+  const euroTotal = euro(totalCents);
+
+  // ✉️ verzend-instructies
+  let shippingIntro = "";
+  let shippingDetails = "";
+
+  // Vul hier je daadwerkelijke ontvangstadres in:
+  const arcanaAddressLines = [
+    "ArcanaFrisia",
+    "Hindrik Arendz",
+    "Ulelflecht 18",
+    "9244 ET Beetsterzwaag",
+    "Nederland",
+  ];
+
+  const arcanaAddressHtml = arcanaAddressLines.map(esc).join("<br/>");
+
+  if (shippingMethod === "LABEL") {
+    shippingIntro =
+      labelFree
+        ? "Je hebt gekozen voor een verzendlabel via ArcanaFrisia. Omdat je buylist boven de €150 uitkomt, is dit label gratis."
+        : "Je hebt gekozen voor een verzendlabel via ArcanaFrisia. De kosten hiervoor zijn €5,-.";
+
+    shippingDetails = `
+      <p style="margin:8px 0 8px">
+        Binnen 1 werkdag ontvang je van ons een aparte e-mail met een verzendlabel
+        (of barcode) dat je bij het postpunt kunt laten scannen.
+      </p>
+      <p style="margin:0 0 8px">
+        Verpak je kaarten goed, sorteer ze in dezelfde volgorde als in de tabel hierboven,
+        verwijder sleeves/toploaders, stop de kaarten in een zakje en vervolgens in een stevige verpakking of bubbel envelop.
+      </p>
+    `;
+  } else {
+    shippingIntro =
+      "Je hebt aangegeven de zending zelf te versturen (eigen risico). Gebruik bij voorkeur een verzendmethode met tracking.";
+
+    shippingDetails = `
+      <p style="margin:8px 0 4px">
+        Verstuur je kaarten naar het volgende adres:
+      </p>
+      <p style="margin:0 0 8px">
+        ${arcanaAddressHtml}
+      </p>
+      <p style="margin:0 0 8px">
+        Sorteer de kaarten in dezelfde volgorde als in de tabel hierboven,
+        verwijder sleeves/toploaders, stop de kaarten in een zakje en vervolgens in een stevige verpakking of bubbel envelop.
+      </p>
+    `;
+  }
+
+
   return `
   <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial">
     <h2 style="margin:0 0 8px">Bedankt voor je buylist!</h2>
-    <p style="margin:0 0 12px">Referentie: <strong>${esc(String(submissionId))}</strong></p>
-    <p style="margin:0 0 12px">We hebben je inzending ontvangen op <strong>${esc(email)}</strong>.</p>
+    <p style="margin:0 0 12px">
+      Referentie: <strong>${esc(String(submissionId))}</strong>
+    </p>
+    <p style="margin:0 0 12px">
+      We hebben je inzending ontvangen op <strong>${esc(email)}</strong>.
+      Het voorlopig totaalbedrag is <strong>${euroTotal}</strong>.
+    </p>
+
     <table style="width:100%;border-collapse:collapse;margin-top:8px">
       <thead>
         <tr>
@@ -107,23 +175,70 @@ export function customerConfirmationHtml(args: {
       <tfoot>
         <tr>
           <td colspan="3" style="text-align:right;padding:8px 8px 0 8px;font-weight:600">Totaal</td>
-          <td style="text-align:right;padding:8px 8px 0 8px;font-weight:600">${euro(totalCents)}</td>
+          <td style="text-align:right;padding:8px 8px 0 8px;font-weight:600">${euroTotal}</td>
         </tr>
       </tfoot>
     </table>
-    <p style="font-size:12px;color:#666;margin-top:16px">
-      Let op: voorlopig bedrag op basis van opgegeven conditie. Definitief na ontvangst & controle.
+
+    <p style="margin:16px 0 4px;font-weight:600">Verzending & verpakking</p>
+    <p style="margin:0 0 4px;">${esc(shippingIntro)}</p>
+    ${shippingDetails}
+
+    <p style="margin:12px 0 4px;font-weight:600">Controle & uitbetaling</p>
+    <p style="margin:0 0 4px;">
+      Zodra we je zending hebben ontvangen, controleren we de kaarten op aantal, versie en conditie.
+    </p>
+    <p style="margin:0 0 4px;">
+      Als alles klopt, bevestigen we het definitieve bedrag en betalen we meestal binnen
+      <strong>2 werkdagen</strong> uit.
+    </p>
+    <p style="margin:0 0 8px;font-size:12px;color:#666">
+      Afwijkingen in conditie of kaartversie kunnen kleine aanpassingen in het totaalbedrag geven.
+    </p>
+
+    <p style="margin:8px 0 0;font-size:12px;color:#666">
+      Tip: check eventueel ook je spamfolder als je geen e-mails van ons ziet.
     </p>
   </div>`;
 }
+
+
 
 export function internalNewSubmissionHtml(args: {
   submissionId: string | number;
   email: string;
   totalCents: number;
   items: Array<{ name: string; qty: number; unitCents: number; lineCents: number }>;
+  shippingMethod?: "SELF" | "LABEL";
+  labelFree?: boolean;
+
+  fullName?: string;
+  addressLine1?: string;
+  postalCode?: string;
+  city?: string;
+  country?: string;
+  payoutMethod?: string;   // "BANK" | "PAYPAL"
+  iban?: string;
+  paypalEmail?: string;
 }) {
-  const { submissionId, email, totalCents, items } = args;
+  const {
+    submissionId,
+    email,
+    totalCents,
+    items,
+    shippingMethod,
+    labelFree,
+    fullName,
+    addressLine1,
+    postalCode,
+    city,
+    country,
+    payoutMethod,
+    iban,
+    paypalEmail,
+  } = args;
+
+
 
   const rows = items
     .map(
@@ -137,11 +252,52 @@ export function internalNewSubmissionHtml(args: {
     )
     .join("");
 
+  // shipping
+  let shippingText = "Onbekend (geen keuze meegestuurd)";
+  if (shippingMethod === "SELF") {
+    shippingText = "Klant verstuurt zelf (eigen risico)";
+  } else if (shippingMethod === "LABEL") {
+    shippingText = labelFree
+      ? "Label gevraagd via ArcanaFrisia – GRATIS (≥ €150)"
+      : "Label gevraagd via ArcanaFrisia – €5,-";
+  }
+
+  // adres
+  const addressLines: string[] = [];
+  if (fullName) addressLines.push(fullName);
+  if (addressLine1) addressLines.push(addressLine1);
+  const cityLineParts = [];
+  if (postalCode) cityLineParts.push(postalCode);
+  if (city) cityLineParts.push(city);
+  if (cityLineParts.length) addressLines.push(cityLineParts.join(" "));
+  if (country) addressLines.push(country);
+  const addressHtml = addressLines.length
+    ? addressLines.map((l) => esc(l)).join("<br/>")
+    : "Onbekend";
+
+  // payout
+  let payoutText = "Onbekend";
+  if (payoutMethod === "BANK") {
+    payoutText = `Bankoverschrijving (IBAN: ${esc(iban || "onbekend")})`;
+  } else if (payoutMethod === "PAYPAL") {
+    payoutText = `PayPal (${esc(paypalEmail || "onbekend")})`;
+  }
+
+
+
   return `
   <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial">
     <h3 style="margin:0 0 8px">Nieuwe buylist – ${esc(String(submissionId))}</h3>
     <p style="margin:0 0 8px"><strong>Klant:</strong> ${esc(email)}</p>
+
+    <p style="margin:0 0 4px"><strong>Adres:</strong></p>
+    <p style="margin:0 0 8px">${addressHtml}</p>
+
+    <p style="margin:0 0 4px"><strong>Betaalmethode:</strong> ${esc(payoutText)}</p>
+    <p style="margin:0 0 8px"><strong>Shipping:</strong> ${esc(shippingText)}</p>
+
     <table style="width:100%;border-collapse:collapse;margin-top:8px">
+
       <thead>
         <tr>
           <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #ccc">Item</th>

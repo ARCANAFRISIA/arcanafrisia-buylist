@@ -484,7 +484,7 @@ return out;
               betrouwbare manier om oude en nieuwe (1993-2025) Magic kaarten online te verkopen. Wij
               baseren onze buylist-prijzen op Cardmarket trend en betalen tot wel {" "}
               <span className="font-semibold text-slate-100">90%</span> van die waarde, met
-              eerlijke grading en snelle uitbetaling.
+              eerlijke grading en snelle uitbetaling. Gratis verzendlabel vanaf €150,-
             </p>
           </section>
 

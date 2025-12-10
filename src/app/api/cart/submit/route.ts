@@ -40,11 +40,83 @@ type InItem = {
   cond?: string;
 };
 
+type InMeta = {
+  clientTotal?: number;
+  shippingMethod?: string;
+};
+
+type InBody = {
+  email: string;
+  fullName?: string;
+  addressLine1?: string;
+  postalCode?: string;
+  city?: string;
+  country?: string;
+  payoutMethod?: string;
+  iban?: string;
+  paypalEmail?: string;
+  items: InItem[];
+  meta?: InMeta;
+};
+
+
+
 export async function POST(req: NextRequest) {
   try {
-    const { email, items, meta } = await req.json();
+    const body: InBody = await req.json();
+const {
+  email,
+  fullName,
+  addressLine1,
+  postalCode,
+  city,
+  country,
+  payoutMethod,
+  iban,
+  paypalEmail,
+  items,
+  meta,
+} = body;
+
+
 
     // ---- validatie ----
+    if (!fullName || !fullName.trim()) {
+  return NextResponse.json(
+    { ok: false, error: "Naam is vereist" },
+    { status: 400 }
+  );
+}
+if (!addressLine1 || !postalCode || !city || !country) {
+  return NextResponse.json(
+    { ok: false, error: "Volledig adres is vereist" },
+    { status: 400 }
+  );
+}
+
+if (!payoutMethod) {
+  return NextResponse.json(
+    { ok: false, error: "Betaalmethode is vereist" },
+    { status: 400 }
+  );
+}
+
+if (payoutMethod === "BANK") {
+  if (!iban || !iban.trim()) {
+    return NextResponse.json(
+      { ok: false, error: "IBAN is vereist voor bankoverschrijving" },
+      { status: 400 }
+    );
+  }
+} else if (payoutMethod === "PAYPAL") {
+  if (!paypalEmail || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(paypalEmail)) {
+    return NextResponse.json(
+      { ok: false, error: "Geldig PayPal e-mailadres is vereist" },
+      { status: 400 }
+    );
+  }
+}
+
     if (
       !email ||
       typeof email !== "string" ||
@@ -274,22 +346,36 @@ export async function POST(req: NextRequest) {
 
 
       
-    const serverTotalCents = filtered.reduce(
-      (s, r) => s + r.lineCents,
-      0
-    );
-    const clientTotalCents = Math.round(
-      Number(meta?.clientTotal ?? 0) * 100
-    );
+    const shippingMethodRaw = meta?.shippingMethod;
+const shippingMethod: "SELF" | "LABEL" =
+  shippingMethodRaw === "LABEL" ? "LABEL" : "SELF";
+
+const serverTotalCents = filtered.reduce((s, r) => s + r.lineCents, 0);
+const clientTotalCents = Math.round(Number(meta?.clientTotal ?? 0) * 100);
+
+const labelFree =
+  shippingMethod === "LABEL" && serverTotalCents >= 15000; // €150
+
+
 
     // ---- wegschrijven ----
     const submission = await prisma.submission.create({
       data: {
-        email,
-        payoutPct: payoutPctInt,
-        serverTotalCents,
-        subtotalCents: serverTotalCents,
-        items: {
+  email,
+  fullName: fullName || null,
+  addressLine1: addressLine1 || null,
+  postalCode: postalCode || null,
+  city: city || null,
+  country: country || null,
+  payoutMethod: payoutMethod || null,
+  iban: iban || null,
+  paypalEmail: paypalEmail || null,
+  shippingMethod,
+
+  payoutPct: payoutPctInt,
+  serverTotalCents,
+  subtotalCents: serverTotalCents,
+  items: {
           create: filtered.map((r) => ({
             productId: BigInt(r.idProduct), // we bewaren hier dus cardmarketId
             isFoil: r.isFoil,
@@ -312,15 +398,17 @@ export async function POST(req: NextRequest) {
             setCode: metaById.get(r.idProduct)?.set ?? null,
             condition: r.condKey,
           })),
-        },
-        metaText: JSON.stringify({
-          clientTotalCents,
-          itemsLength: items.length,
-          receivedAt: new Date().toISOString(),
-        }),
-        currency: "EUR",
-        pricingSource: "Cardmarket",
-      },
+   },
+  metaText: JSON.stringify({
+    clientTotalCents,
+    itemsLength: items.length,
+    receivedAt: new Date().toISOString(),
+    shippingMethod,
+    labelFree,
+  }),
+  currency: "EUR",
+  pricingSource: "Cardmarket",
+},
       include: { items: true },
     });
 
@@ -386,12 +474,23 @@ function buildMailItems() {
 
   return enriched.map(({ item, meta }) => {
     const cmId = Number(item.productId);
+
     const base = meta
       ? `${meta.name}${
           meta.set ? ` [${meta.set.toUpperCase()}]` : ""
         }${meta.collectorNumber ? ` #${meta.collectorNumber}` : ""}`
       : `#${cmId}`;
-    const label = `${base}${item.isFoil ? " (Foil)" : ""}`;
+
+    const details: string[] = [];
+    if (item.condition) {
+      details.push(String(item.condition));
+    }
+    if (item.isFoil) {
+      details.push("Foil");
+    }
+
+    const suffix = details.length ? ` • ${details.join(" • ")}` : "";
+    const label = `${base}${suffix}`;
 
     return {
       name: label,
@@ -401,6 +500,7 @@ function buildMailItems() {
     };
   });
 }
+
 
 
     const mailItems = buildMailItems();
@@ -418,12 +518,15 @@ function buildMailItems() {
       await sendMail({
         to: submission.email ?? undefined,
         subject: "Buylist bevestigd – referentie " + submission.id,
-        html: customerConfirmationHtml({
-          submissionId: submission.id,
-          email: submission.email ?? "",
-          totalCents,
-          items: mailItems,
-        }),
+       html: customerConfirmationHtml({
+  submissionId: submission.id,
+  email: submission.email ?? "",
+  totalCents,
+  items: mailItems,
+  shippingMethod,
+  labelFree,
+}),
+
         replyTo: process.env.MAIL_ADMIN,
       });
       console.log("[submit] customer mail sent");
@@ -435,12 +538,24 @@ function buildMailItems() {
     try {
       await sendMail({
         subject: "Buylist ontvangen – " + submission.id,
-        html: internalNewSubmissionHtml({
-          submissionId: submission.id,
-          email: submission.email ?? "",
-          totalCents,
-          items: mailItems,
-        }),
+html: internalNewSubmissionHtml({
+  submissionId: submission.id,
+  email: submission.email ?? "",
+  totalCents,
+  items: mailItems,
+  shippingMethod,
+  labelFree,
+  fullName,
+  addressLine1,
+  postalCode,
+  city,
+  country,
+  payoutMethod,
+  iban,
+  paypalEmail,
+}),
+
+
         replyTo: submission.email ?? undefined,
       });
       console.log("[submit] admin mail sent");

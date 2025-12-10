@@ -33,9 +33,16 @@ model PriceGuide {
 model Submission {
   id               String           @id @default(cuid())
   email            String?
-  // OUD:
-  // status           String           @default("RECEIVED")
-  // NIEUW:
+  fullName         String?
+  addressLine1     String?
+  postalCode       String?
+  city             String?
+  country          String?
+  payoutMethod     String?          // "BANK" of "PAYPAL"
+  iban             String?
+  paypalEmail      String?
+  shippingMethod   String?          // "SELF" of "LABEL"
+
   status           String           @default("SUBMITTED")
   subtotalCents    Int
   serverTotalCents Int
@@ -48,6 +55,7 @@ model Submission {
   updatedAt        DateTime         @updatedAt
   items            SubmissionItem[]
 }
+
 
 
 model SubmissionItem {

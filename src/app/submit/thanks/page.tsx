@@ -22,7 +22,8 @@ export default async function ThanksPage({ searchParams }: ThanksPageProps) {
 
           <p className="mt-3 text-sm af-muted">
             We hebben je buylist succesvol ontvangen. Binnen korte tijd ontvang je een bevestigingsmail
-            met alle details van je inzending.
+            met alle details van je inzending. Controleer ook even je
+  spam- of ongewenste mailmap als je niets ziet binnen enkele minuten.
           </p>
 
           {id && (
@@ -48,7 +49,7 @@ export default async function ThanksPage({ searchParams }: ThanksPageProps) {
           </div>
 
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/buy">
+            <Link href="/">
               <button
                 className="rounded-full px-4 py-2 text-sm font-semibold"
                 style={{ backgroundColor: GOLD, color: "#0A0F1A" }}
