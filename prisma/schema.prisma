@@ -42,6 +42,7 @@ model Submission {
   iban             String?
   paypalEmail      String?
   shippingMethod   String?          // "SELF" of "LABEL"
+  labelFree        Boolean?         @default(false)
 
   status           String           @default("SUBMITTED")
   subtotalCents    Int
