@@ -14,8 +14,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Arcana Frisia Buylist",
-  description: "Inkooptool en admin voor Arcana Frisia.",
+  title: "Arcana Frisia Buylist – Magic: the Gathering kaarten verkopen",
+  description:
+    "Verkoop je Magic: the Gathering kaarten snel en betrouwbaar via de ArcanaFrisia Buylist. Tot 90% van Cardmarket trend, eerlijke grading en snelle uitbetaling. Gratis verzendlabel vanaf €150.",
+  metadataBase: new URL("https://buylist.arcanafrisia.com"),
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default function RootLayout({
