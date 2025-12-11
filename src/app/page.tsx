@@ -26,9 +26,7 @@ type FormatOption =
   | "Pioneer"
   | "Modern"
   | "Legacy"
-  | "Vintage"
-  | "Premodern"
-  | "Pauper"
+  | "Specials"
   | "Commander";
 
 
@@ -135,11 +133,30 @@ function itemIsBuyable(it: Item): boolean {
 // simpele popularity-score voor sort "Most popular"
 function popularityScore(it: Item): number {
   const tix = it.tix ?? 0;
-  const edh = it.edhrecRank ?? 0;
-  const gc = it.gameChanger ? 1 : 0;
-  const edhScore = edh ? 100000 - Math.min(edh, 100000) : 0;
-  return tix * 100 + edhScore + gc * 50000;
+  const edhRank = it.edhrecRank ?? 0;
+  const isGameChanger = it.gameChanger ?? false;
+
+  const isStaple =
+    tix >= 3 || // digitale staple
+    (edhRank > 0 && edhRank <= 1000) || // top EDH kaarten
+    isGameChanger;
+
+  // MTGO weging
+  const baseTixWeight = 100;
+  const stapleTixWeight = 300; // hier maak je tix zwaarder
+  const tixWeight = isStaple ? stapleTixWeight : baseTixWeight;
+
+  const tixScore = tix * tixWeight;
+
+  // EDH-score blijft zoals je 'm had
+  const edhScore = edhRank ? 100000 - Math.min(edhRank, 100000) : 0;
+
+  // los bonusje voor gameChangers
+  const gcBonus = isGameChanger ? 50000 : 0;
+
+  return tixScore + edhScore + gcBonus;
 }
+
 
 // mapping van UI-format naar Scryfall-legalities key
 const FORMAT_TO_LEGALITY_KEY: Record<string, string> = {
@@ -147,9 +164,7 @@ const FORMAT_TO_LEGALITY_KEY: Record<string, string> = {
   Pioneer: "pioneer",
   Modern: "modern",
   Legacy: "legacy",
-  Vintage: "vintage",
-  Premodern: "premodern",
-  Pauper: "pauper",
+  Specials: "specials",
   Commander: "commander",
 };
 
@@ -368,16 +383,28 @@ const visible = useMemo(() => {
     }
 
     if (selectedFormat) {
-      const key = FORMAT_TO_LEGALITY_KEY[selectedFormat] ?? null;
-      if (key) {
-        out = out.filter((it) => {
-          const leg = it.legalities;
-          if (!leg) return false;
-          const setLeg = (leg as any).set ?? {};
-          return setLeg[key] === "legal";
-        });
-      }
-    }
+  const key = FORMAT_TO_LEGALITY_KEY[selectedFormat] ?? null;
+
+  // alleen echte formats via legalities filteren, specials overslaan
+  const FRONTEND_LEGALITY_KEYS = [
+    "standard",
+    "modern",
+    "legacy",
+    "pioneer",
+    "premodern",
+    "pauper",
+    "commander",
+  ];
+
+  if (key && FRONTEND_LEGALITY_KEYS.includes(key)) {
+    out = out.filter((it) => {
+      const leg = it.legalities as any;
+      if (!leg || !leg.set) return false;
+      return leg.set[key] === "legal";
+    });
+  }
+}
+
 
     // price range alleen in browse-modus
     const min =
@@ -489,24 +516,30 @@ return out;
           </section>
 
           {/* SEARCH + VIEW + SORT */}
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-           <Input
-  value={q}
-  onChange={(e) => setQ(e.target.value)}
-  placeholder="Zoek op kaartnaam (optioneel)…"
-  className="
-    af-card border af-text placeholder:af-muted
-    focus-visible:ring-0
-    rounded-full
-    shadow-[0_0_0_1px_rgba(0,0,0,0.6)]
-  "
-  style={{
-    height: "3.4rem",        // hoger → ~54px
-    fontSize: "1rem",        // net boven standaard
-    paddingInline: "1rem",   // wat meer ruimte links/rechts
-    borderColor: "#C9A24E",  // subtiele gouden rand
-  }}
-/>
+<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+  {/* Alleen op mobiel een beetje padding links/rechts */}
+  <div className="w-full px-2 sm:px-0">
+    <Input
+      value={q}
+      onChange={(e) => setQ(e.target.value)}
+      placeholder="Zoek op kaartnaam (optioneel)…"
+      className="
+        af-card border af-text placeholder:af-muted
+        focus-visible:ring-0
+        rounded-full
+        shadow-[0_0_0_1px_rgba(0,0,0,0.6)]
+        w-full
+      "
+      style={{
+        height: "3.4rem",
+        fontSize: "1rem",
+        paddingInline: "1rem",
+        borderColor: "#C9A24E",
+      }}
+    />
+  </div>
+
+
 
 
             <div className="flex items-center justify-end gap-3">
@@ -637,10 +670,8 @@ return out;
                   <option value="Pioneer">Pioneer</option>
                   <option value="Modern">Modern</option>
                   <option value="Legacy">Legacy</option>
-                  <option value="Vintage">Vintage</option>
-                  <option value="Premodern">Premodern</option>
-                  <option value="Pauper">Pauper</option>
                   <option value="Commander">Commander</option>
+                  <option value="Specials">Special / Secret lair</option>
                   <option value="">Alle formats</option>
                 </select>
               </div>
