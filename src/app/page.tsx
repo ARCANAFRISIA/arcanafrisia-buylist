@@ -659,7 +659,7 @@ return out;
               {/* Format */}
               <div className="space-y-1">
                 <label className="block text-[13px] uppercase tracking-wide af-muted">
-                  Format
+                  Categorie / Format
                 </label>
                 <select
                   value={selectedFormat}
