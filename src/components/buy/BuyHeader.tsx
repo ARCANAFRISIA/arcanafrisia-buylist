@@ -1,11 +1,48 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+
 import CartModal from "@/components/cart/CartModal";
 
 export default function BuyHeader() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(false); // mobile menu
+  const [infoOpenDesktop, setInfoOpenDesktop] = useState(false); // desktop Info
+  const [infoOpenMobile, setInfoOpenMobile] = useState(false); // mobile Info
+
+    // WebwinkelKeur sidebar alleen op desktop laden
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // alleen desktop (tailwind sm ~ 640, ik pak 768 om safe te zitten)
+    if (window.innerWidth < 768) return;
+
+    // niet dubbel laden
+    if ((window as any).__wwkSidebarLoaded) return;
+    (window as any).__wwkSidebarLoaded = true;
+
+    const base = "https://dashboard.webwinkelkeur.nl";
+    const id = 1211185;
+
+    function c(s: number, i: number) {
+      const o = Date.now();
+      const a = s * 60000;
+      const _ = (Math.sin(i) || 0) * a;
+      return Math.floor((o + _) / a);
+    }
+
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = `${base}/sidebar.js?id=${id}&c=${c(10, id)}`;
+
+    const firstScript = document.getElementsByTagName("script")[0];
+    if (firstScript && firstScript.parentNode) {
+      firstScript.parentNode.insertBefore(script, firstScript);
+    } else {
+      document.body.appendChild(script);
+    }
+  }, []);
+
 
   return (
     <div>
@@ -25,45 +62,86 @@ export default function BuyHeader() {
         <div className="af-inner">
           {/* Links: brand + desktop-menu */}
           <div className="af-left">
-            <Link
-              href="/"
-              className="af-brand"
-              style={{
-                color: "#f9fafb",
-                textDecoration: "none",
-              }}
-            >
+            <Link href="/" className="af-brand">
               Arcana Frisia Buylist
             </Link>
 
             {/* Desktop menu */}
             <nav className="af-nav-desktop">
-              <Link
-                href="/buy/sets"
-                className="af-nav-link"
-                style={{ color: "#e5e7eb", textDecoration: "none" }}
-              >
+              <Link href="/buy/sets" className="af-nav-link">
                 Sets
               </Link>
-              <Link
-                href="/buy/list"
-                className="af-nav-link"
-                style={{ color: "#e5e7eb", textDecoration: "none" }}
-              >
+              <Link href="/buy/list" className="af-nav-link">
                 List upload
               </Link>
-              <Link
-                href="/buy/info"
-                className="af-nav-link"
-                style={{ color: "#e5e7eb", textDecoration: "none" }}
-              >
-                Info
-              </Link>
-              <Link
-                href="/buy/account"
-                className="af-nav-link"
-                style={{ color: "#e5e7eb", textDecoration: "none" }}
-              >
+
+              {/* Info dropdown (desktop) */}
+              <div className="af-nav-info-wrapper">
+                <button
+                  type="button"
+                  className="af-nav-link af-nav-info-trigger"
+                  onClick={() => setInfoOpenDesktop((v) => !v)}
+                >
+                  <span>Info</span>
+                  <span className="af-nav-info-caret">▾</span>
+                </button>
+
+                {infoOpenDesktop && (
+                  <div className="af-nav-info-dropdown">
+                    <Link
+                      href="/buy/info#over-ons"
+                      className="af-nav-info-link"
+                      onClick={() => setInfoOpenDesktop(false)}
+                    >
+                      Over ons
+                    </Link>
+                    <Link
+                      href="/buy/info#hoe-werkt-het"
+                      className="af-nav-info-link"
+                      onClick={() => setInfoOpenDesktop(false)}
+                    >
+                      Hoe werkt verkopen?
+                    </Link>
+                    <Link
+                      href="/buy/info#grading"
+                      className="af-nav-info-link"
+                      onClick={() => setInfoOpenDesktop(false)}
+                    >
+                      Grading &amp; conditie
+                    </Link>
+                    <Link
+                      href="/buy/info#betaling-verzenden"
+                      className="af-nav-info-link"
+                      onClick={() => setInfoOpenDesktop(false)}
+                    >
+                      Betaling &amp; verzenden
+                    </Link>
+                    <Link
+                      href="/buy/info#reviews"
+                      className="af-nav-info-link"
+                      onClick={() => setInfoOpenDesktop(false)}
+                    >
+                      Reviews &amp; vertrouwen
+                    </Link>
+                    <Link
+                      href="/buy/info#faq"
+                      className="af-nav-info-link"
+                      onClick={() => setInfoOpenDesktop(false)}
+                    >
+                      FAQ
+                    </Link>
+                    <Link
+                      href="/buy/info#bedrijfsgegevens"
+                      className="af-nav-info-link"
+                      onClick={() => setInfoOpenDesktop(false)}
+                    >
+                      Bedrijfsgegevens
+                    </Link>
+                  </div>
+                )}
+              </div>
+
+              <Link href="/buy/account" className="af-nav-link">
                 Account
               </Link>
             </nav>
@@ -74,7 +152,12 @@ export default function BuyHeader() {
             <button
               type="button"
               className="af-menu-btn"
-              onClick={() => setOpen((v) => !v)}
+              onClick={() => {
+                setOpen((v) => !v);
+                if (!open) {
+                  setInfoOpenMobile(false);
+                }
+              }}
             >
               ☰ Menu
             </button>
@@ -90,7 +173,6 @@ export default function BuyHeader() {
               <Link
                 href="/buy/sets"
                 className="af-nav-link-mobile"
-                style={{ color: "#e5e7eb", textDecoration: "none" }}
                 onClick={() => setOpen(false)}
               >
                 Sets
@@ -98,23 +180,101 @@ export default function BuyHeader() {
               <Link
                 href="/buy/list"
                 className="af-nav-link-mobile"
-                style={{ color: "#e5e7eb", textDecoration: "none" }}
                 onClick={() => setOpen(false)}
               >
                 List upload
               </Link>
-              <Link
-                href="/buy/info"
-                className="af-nav-link-mobile"
-                style={{ color: "#e5e7eb", textDecoration: "none" }}
-                onClick={() => setOpen(false)}
+
+              {/* Info met uitklapbare sublinks (mobiel) */}
+              <button
+                type="button"
+                className="af-nav-link-mobile af-nav-info-mobile-trigger"
+                onClick={() => setInfoOpenMobile((v) => !v)}
               >
-                Info
-              </Link>
+                <span>Info</span>
+                <span className="af-nav-info-caret">
+                  {infoOpenMobile ? "▴" : "▾"}
+                </span>
+              </button>
+
+              {infoOpenMobile && (
+                <div className="af-nav-info-mobile-list">
+                  <Link
+                    href="/buy/info#over-ons"
+                    className="af-nav-link-mobile-sub"
+                    onClick={() => {
+                      setOpen(false);
+                      setInfoOpenMobile(false);
+                    }}
+                  >
+                    Over ons
+                  </Link>
+                  <Link
+                    href="/buy/info#hoe-werkt-het"
+                    className="af-nav-link-mobile-sub"
+                    onClick={() => {
+                      setOpen(false);
+                      setInfoOpenMobile(false);
+                    }}
+                  >
+                    Hoe werkt verkopen?
+                  </Link>
+                  <Link
+                    href="/buy/info#grading"
+                    className="af-nav-link-mobile-sub"
+                    onClick={() => {
+                      setOpen(false);
+                      setInfoOpenMobile(false);
+                    }}
+                  >
+                    Grading &amp; conditie
+                  </Link>
+                  <Link
+                    href="/buy/info#betaling-verzenden"
+                    className="af-nav-link-mobile-sub"
+                    onClick={() => {
+                      setOpen(false);
+                      setInfoOpenMobile(false);
+                    }}
+                  >
+                    Betaling &amp; verzenden
+                  </Link>
+                  <Link
+                    href="/buy/info#reviews"
+                    className="af-nav-link-mobile-sub"
+                    onClick={() => {
+                      setOpen(false);
+                      setInfoOpenMobile(false);
+                    }}
+                  >
+                    Reviews &amp; vertrouwen
+                  </Link>
+                  <Link
+                    href="/buy/info#faq"
+                    className="af-nav-link-mobile-sub"
+                    onClick={() => {
+                      setOpen(false);
+                      setInfoOpenMobile(false);
+                    }}
+                  >
+                    FAQ
+                  </Link>
+                  <Link
+                    href="/buy/info#bedrijfsgegevens"
+                    className="af-nav-link-mobile-sub"
+                    onClick={() => {
+                      setOpen(false);
+                      setInfoOpenMobile(false);
+                    }}
+                  >
+                    Bedrijfsgegevens
+                  </Link>
+                </div>
+              )}
+
               <Link
                 href="/buy/account"
                 className="af-nav-link-mobile"
-                style={{ color: "#e5e7eb", textDecoration: "none" }}
                 onClick={() => setOpen(false)}
               >
                 Account
@@ -125,25 +285,40 @@ export default function BuyHeader() {
 
         <style jsx>{`
           .af-header {
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 40; /* boven content, onder modals */
-    width: 100%;
-    background-color: #050910;
-    border-bottom: 1px solid #111827;
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
-  }
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 40;
+            width: 100%;
+            background-color: #050910;
+            border-bottom: 1px solid #111827;
+            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+          }
 
-  .af-inner {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 1.75rem;
-    height: 56px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
+          .af-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 1.75rem;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+          }
+
+          /* ✅ Forceer link-styling binnen header (desktop + mobiel) */
+          :global(.af-header a) {
+            color: #e5e7eb !important;
+            text-decoration: none !important;
+          }
+
+          :global(.af-header a:visited) {
+            color: #e5e7eb !important;
+          }
+
+          :global(.af-header a:hover) {
+            color: var(--gold) !important;
+            text-decoration: none !important;
+          }
 
           .af-left {
             display: flex;
@@ -166,8 +341,57 @@ export default function BuyHeader() {
             font-weight: 600;
           }
 
-          .af-nav-link:hover {
-            color: var(--gold) !important;
+          .af-nav-link {
+            cursor: pointer;
+          }
+
+          .af-nav-info-wrapper {
+            position: relative;
+          }
+
+          .af-nav-info-trigger {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            background: none;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            color: #e5e7eb;
+          }
+
+          .af-nav-info-caret {
+            font-size: 0.7rem;
+            opacity: 0.8;
+          }
+
+          .af-nav-info-dropdown {
+            position: absolute;
+            top: 140%;
+            left: 0;
+            min-width: 220px;
+            padding: 0.35rem 0.4rem;
+            border-radius: 0.75rem;
+            border: 1px solid #111827;
+            background-color: #050910;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .af-nav-info-link {
+            display: block;
+            padding: 0.35rem 0.6rem;
+            border-radius: 0.5rem;
+            font-size: 0.85rem;
+          }
+
+          .af-nav-info-link:hover {
+            background-color: rgba(255, 255, 255, 0.04);
           }
 
           .af-right {
@@ -250,6 +474,35 @@ export default function BuyHeader() {
 
             .af-nav-link-mobile:hover {
               color: var(--gold) !important;
+            }
+
+            .af-nav-info-mobile-trigger {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              gap: 0.25rem;
+              background: none;
+              border: none;
+              padding: 0;
+              text-align: left;
+              cursor: pointer;
+              font-size: 0.9rem;
+              font-weight: 600;
+              color: #e5e7eb !important;
+            }
+
+            .af-nav-info-mobile-list {
+              padding-left: 0.75rem;
+              padding-top: 0.15rem;
+              padding-bottom: 0.2rem;
+              display: flex;
+              flex-direction: column;
+              gap: 0.15rem;
+            }
+
+            .af-nav-link-mobile-sub {
+              font-size: 0.78rem;
+              font-weight: 500;
             }
           }
 
