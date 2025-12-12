@@ -144,7 +144,7 @@ export default function BuyInfoPage() {
               </li>
               <li>
                 Verwijder sleeves/toploaders waar mogelijk (duurdere kaarten &gt;
-                € 25 mogen natuurlijk goed beschermd blijven).
+                € 75 mogen natuurlijk goed beschermd blijven).
               </li>
               <li>
                 Bundel kaarten in een zakje of team bag en gebruik een stevige
@@ -245,7 +245,7 @@ export default function BuyInfoPage() {
           </ul>
 
           <p className="af-muted">
-            Twijfel je of een kaart NM of EX is? Kies dan bij voorkeur EX. Bij
+            Twijfel je of een kaart EX of GD is? Kies dan bij voorkeur GD. Bij
             grote afwijkingen in grading passen we de buylist aan en krijg je
             altijd eerst een overzicht met de wijzigingen.
           </p>
@@ -340,67 +340,96 @@ export default function BuyInfoPage() {
 
 
         {/* FAQ */}
-        <section
+<section
   id="faq"
   className="space-y-4 text-sm md:text-base leading-relaxed scroll-mt-24"
 >
-  <h2 className="text-2xl font-semibold">Veelgestelde vragen (FAQ)</h2>
+  <h2 className="text-2xl font-semibold mb-2">Veelgestelde vragen (FAQ)</h2>
 
-  <div className="space-y-3">
-    <div className="af-card border border-[var(--border)] rounded-xl bg-[var(--bg2)] p-4">
-      <p className="font-semibold mb-1">
+  <div className="af-panel border border-[var(--border)] rounded-xl bg-[var(--bg2)] divide-y divide-[var(--border)]">
+    
+    {/* 1. Geldigheid van offerte */}
+    <details className="group">
+      <summary className="cursor-pointer flex justify-between items-center p-4 font-semibold af-text">
         Hoe lang is mijn buylist-offerte geldig?
-      </p>
-      <p className="af-muted">
-        In principe kun je je kaarten direct opsturen na het indienen van je
-        buylist. We vragen je om dit binnen ongeveer <strong>3 dagen</strong> te
-        doen, zodat prijzen en voorraad nog aansluiten op de situatie van dat
-        moment.
-      </p>
-    </div>
+        <span className="transition-transform group-open:rotate-180 text-[var(--gold)]">⌄</span>
+      </summary>
+      <div className="p-4 pt-0 af-muted">
+        We vragen je om je kaarten binnen <strong>3 dagen</strong> te verzenden 
+        nadat je je buylist hebt ingediend. Zo sluiten prijzen en voorraad het beste aan 
+        op de situatie van dat moment.
+      </div>
+    </details>
 
-    <div className="af-card border border-[var(--border)] rounded-xl bg-[var(--bg2)] p-4">
-      <p className="font-semibold mb-1">
+    {/* 2. Conditie slechter dan gekozen */}
+    <details className="group">
+      <summary className="cursor-pointer flex justify-between items-center p-4 font-semibold af-text">
         Wat als mijn kaarten in slechtere conditie zijn dan gekozen?
-      </p>
-      <p className="af-muted">
-        Dan passen we de conditie en bijbehorende payout aan. Je krijgt altijd
-        een overzicht van de wijzigingen voordat we uitbetalen.
-      </p>
-    </div>
+        <span className="transition-transform group-open:rotate-180 text-[var(--gold)]">⌄</span>
+      </summary>
+      <div className="p-4 pt-0 af-muted">
+        Dan passen we de conditie en bijbehorende payout aan. Je ontvangt altijd 
+        een overzicht van eventuele wijzigingen voordat we uitbetalen.
+      </div>
+    </details>
 
-    <div className="af-card border border-[var(--border)] rounded-xl bg-[var(--bg2)] p-4">
-      <p className="font-semibold mb-1">
+    {/* 3. Sealed verkopen */}
+    <details className="group">
+      <summary className="cursor-pointer flex justify-between items-center p-4 font-semibold af-text">
         Kan ik ook sealed producten verkopen?
-      </p>
-      <p className="af-muted">
-        Dat is soms mogelijk, maar niet via de standaard buylist. Stuur ons in
-        dat geval een mail op <strong>info@arcanafrisia.com</strong> met een korte omschrijving en vraagprijs.
-      </p>
-    </div>
+        <span className="transition-transform group-open:rotate-180 text-[var(--gold)]">⌄</span>
+      </summary>
+      <div className="p-4 pt-0 af-muted">
+        Dat is soms mogelijk, maar niet via de standaard buylist. 
+        Mail ons via <strong>info@arcanafrisia.com</strong> met een korte omschrijving 
+        en je vraagprijs.
+      </div>
+    </details>
 
-    <div className="af-card border border-[var(--border)] rounded-xl bg-[var(--bg2)] p-4">
-      <p className="font-semibold mb-1">
+    {/* 4. Kaart niet op buylist */}
+    <details className="group">
+      <summary className="cursor-pointer flex justify-between items-center p-4 font-semibold af-text">
         Wat gebeurt er als een kaart niet op de buylist staat?
-      </p>
-      <p className="af-muted">
-        Dan kopen we die kaart op dit moment niet actief in. Je kunt altijd
-        mailen als je een grotere collectie hebt – dan kunnen we in sommige
-        gevallen een aparte deal maken.
-      </p>
-    </div>
+        <span className="transition-transform group-open:rotate-180 text-[var(--gold)]">⌄</span>
+      </summary>
+      <div className="p-4 pt-0 af-muted">
+        Dan kopen we die kaart op dit moment niet actief in. 
+        Heb je een grotere collectie? Dan kunnen we soms een aparte deal maken – 
+        stuur ons gerust een bericht.
+      </div>
+    </details>
 
-    <div className="af-card border border-[var(--border)] rounded-xl bg-[var(--bg2)] p-4">
-      <p className="font-semibold mb-1">
+    {/* 5. Store credit */}
+    <details className="group">
+      <summary className="cursor-pointer flex justify-between items-center p-4 font-semibold af-text">
         Kan ik buylist-store credit krijgen in plaats van geld?
-      </p>
-      <p className="af-muted">
-        Op dit moment betalen we uit in geld (bank of PayPal). Store credit of
-        trade-in naar andere producten kunnen we in de toekomst toevoegen.
-      </p>
-    </div>
+        <span className="transition-transform group-open:rotate-180 text-[var(--gold)]">⌄</span>
+      </summary>
+      <div className="p-4 pt-0 af-muted">
+        Op dit moment betalen we uit via bank of PayPal. 
+        Store credit of trade-in opties worden mogelijk in de toekomst toegevoegd.
+      </div>
+    </details>
+
+    {/* 6. Nieuwe FAQ: sleeves verwijderen */}
+    <details className="group">
+      <summary className="cursor-pointer flex justify-between items-center p-4 font-semibold af-text">
+        Waarom moeten sleeves van de kaarten af?
+        <span className="transition-transform group-open:rotate-180 text-[var(--gold)]">⌄</span>
+      </summary>
+      <div className="p-4 pt-0 af-muted">
+        Sleeves vertragen het beoordelingsproces omdat iedere kaart handmatig 
+        moet worden uitgepakt. Stuur je kaarten daarom <strong>zonder sleeves</strong> in.
+        <br /><br />
+        Heb je dure kaarten die je extra wilt beschermen? 
+        Plaats ze eventueel <strong>tussen twee sleeves</strong> (geen deck sleeve), zodat 
+        we ze soepel kunnen verwijderen zonder schade of vertraging.
+      </div>
+    </details>
+
   </div>
 </section>
+
 
 
         {/* Bedrijfsgegevens */}

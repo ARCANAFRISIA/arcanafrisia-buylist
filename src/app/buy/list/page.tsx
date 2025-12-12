@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ChangeEvent } from "react";
 import Link from "next/link";
 import { useCart } from "@/lib/store/cart";
 import { Button } from "@/components/ui/button";
@@ -44,7 +44,10 @@ type ParsedLine = {
   foilHint?: boolean;
   // 🔢 nieuw: collector number uit de user input
   collectorNumber?: string | null;
+  // 🧼 nieuw: conditie-hint uit bv. ManaBox CSV
+  condHint?: Condition;
 };
+
 
 type ResolvedLine = ParsedLine & {
   item?: Item;
@@ -87,6 +90,7 @@ function computeClientPayout(it: Item, cond: Condition, foil: boolean): number |
 
 // simpele parser: "4 Solitude MH2", "4x Solitude mh2 foil", "Solitude" (qty=1),
 // en nu ook collector numbers: "Endurance MH2 #123", "Endurance 123#", "Endurance #123", "Endurance MH2 123"
+// én ManaBox-tekst zoals: "1 Can't Stay Away (MID) 213 *F*"
 function parseText(text: string): ParsedLine[] {
   const lines = text.split(/\r?\n/);
   const result: ParsedLine[] = [];
@@ -106,13 +110,41 @@ function parseText(text: string): ParsedLine[] {
       rest = qtyMatch[2].trim();
     }
 
+    // --- 1) ManaBox-achtig formaat herkennen: "Naam (SET) 213 *F*" --- //
+    // Voorbeeld: "Can't Stay Away (MID) 213 *F*"
+    // Voorbeeld: "Edgar, Charmed Groom // Edgar Markov's Coffin (VOW) 236"
+    const manaBoxMatch = rest.match(
+      /^(.+)\s+\(([A-Z0-9]{2,5})\)\s+([0-9A-Za-z]+)(\s+\*F\*)?$/
+    );
+
+    if (manaBoxMatch) {
+      const name = manaBoxMatch[1].trim();
+      const setHint = manaBoxMatch[2].toUpperCase();
+      const collectorNumber = manaBoxMatch[3].trim();
+      const foilHint = !!manaBoxMatch[4];
+
+      result.push({
+        id: id++,
+        raw,
+        qty,
+        name,
+        setHint,
+        foilHint,
+        collectorNumber,
+      });
+
+      // belangrijk: volgende regel (we willen hier NIET nog een keer token-based parsen)
+      continue;
+    }
+
+    // --- 2) Bestaande vrije formaat parsing --- //
     let setHint: string | null = null;
     let foilHint: boolean | undefined = undefined;
     let collectorNumber: string | null = null;
 
     const tokens = rest.split(/\s+/);
 
-    // 1) foil aan het einde herkennen
+    // foil aan het einde herkennen
     if (tokens.length > 1) {
       const last = tokens[tokens.length - 1].toLowerCase();
       if (last === "foil" || last === "(foil)" || last === "f") {
@@ -121,17 +153,11 @@ function parseText(text: string): ParsedLine[] {
       }
     }
 
-    // 2) collector number aan het einde herkennen
-    //    Voorbeelden:
-    //    123      -> digits only
-    //    #123     -> leading '#'
-    //    123#     -> trailing '#'
+    // collector number aan het einde herkennen
     if (tokens.length > 1) {
       const last = tokens[tokens.length - 1];
 
-      // "#123" of "#123a"
       const mLeading = last.match(/^#([0-9A-Za-z]+)$/);
-      // "123#" of "123a#"
       const mTrailing = last.match(/^([0-9A-Za-z]+)#$/);
 
       if (mLeading && /\d/.test(mLeading[1])) {
@@ -141,21 +167,17 @@ function parseText(text: string): ParsedLine[] {
         collectorNumber = mTrailing[1];
         tokens.pop();
       } else if (/^[0-9]{1,4}$/.test(last)) {
-        // pure digits (1–4) → collector number
         collectorNumber = last;
         tokens.pop();
       }
     }
 
-    // 3) setcode aan het einde herkennen, maar alleen als het ALL CAPS is.
-    // Voorbeeld: "Solitude MH2" ✓, maar "Ancient Tomb" ✗
+    // setcode aan het einde herkennen, maar alleen ALL CAPS
     if (tokens.length > 1) {
       const last = tokens[tokens.length - 1];
-
-      // alleen echte setcodes zoals MH2, TMP, LTR, 2XM, etc.
       if (/^[A-Z0-9]{2,5}$/.test(last)) {
-        setHint = last; // al uppercase
-        tokens.pop(); // haal setcode uit de naam
+        setHint = last;
+        tokens.pop();
       }
     }
 
@@ -174,6 +196,7 @@ function parseText(text: string): ParsedLine[] {
 
   return result;
 }
+
 
 // recompute één rij (voor cond/foil/variant wijzigingen)
 function recomputeRow(base: ResolvedLine): ResolvedLine {
@@ -200,6 +223,12 @@ function recomputeRow(base: ResolvedLine): ResolvedLine {
 
 // ==== Component ==== //
 
+const MANABOX_SAMPLE_CSV = [
+  "Name,Set code,Set name,Collector number,Foil,Rarity,Quantity,ManaBox ID,Scryfall ID,Purchase price,Misprint,Altered,Condition,Language,Purchase price currency",
+  "Can't Stay Away,MID,Innistrad: Midnight Hunt,213,foil,rare,1,63211,,0.30,false,false,excellent,en,EUR",
+].join("\n");
+
+
 export default function BuyListUploadPage() {
   const [rawText, setRawText] = useState("");
   const [parsed, setParsed] = useState<ParsedLine[]>([]);
@@ -214,142 +243,299 @@ export default function BuyListUploadPage() {
     setRows((prev) => prev.map((r) => (r.id === id ? fn(r) : r)));
   }
 
-  async function handleParseAndMatch() {
-    const parsedLines = parseText(rawText);
-    setParsed(parsedLines);
-    setRows([]);
-    if (!parsedLines.length) return;
+  async function resolveParsedLines(parsedLines: ParsedLine[]) {
+  setParsed(parsedLines);
+  setRows([]);
+  if (!parsedLines.length) return;
 
-    setLoading(true);
-    try {
-      // unieke combinaties: naam + setHint + collectorNumber
-      const keys = Array.from(
-        new Set(
-          parsedLines.map(
-            (l) => `${l.name}||${l.setHint ?? ""}||${l.collectorNumber ?? ""}`
-          )
+  setLoading(true);
+  try {
+    // unieke combinaties: naam + setHint + collectorNumber
+    const keys = Array.from(
+      new Set(
+        parsedLines.map(
+          (l) => `${l.name}||${l.setHint ?? ""}||${l.collectorNumber ?? ""}`
         )
-      );
+      )
+    );
 
-      const keyToCandidates = new Map<string, Item[]>();
-      const keyToChosen = new Map<string, Item | undefined>();
+    const keyToCandidates = new Map<string, Item[]>();
+    const keyToChosen = new Map<string, Item | undefined>();
 
-      await Promise.all(
-        keys.map(async (key) => {
-          const [name, setHintRaw, collectorRaw] = key.split("||");
-          const setHint = (setHintRaw || "").toUpperCase() || null;
-          const collectorNumber = collectorRaw || "";
+    await Promise.all(
+      keys.map(async (key) => {
+        const [name, setHintRaw, collectorRaw] = key.split("||");
+        const setHint = (setHintRaw || "").toUpperCase() || null;
+        const collectorNumber = collectorRaw || "";
 
-          try {
-            // 🔍 zoek alleen op naam (server kan later set/collector gebruiken)
-            const res = await fetch(
-              `/api/prices/search?query=${encodeURIComponent(name)}`
-            );
-            const body = await res.json();
-            const items = (body.items ?? []) as Item[];
+        try {
+          // 🔍 zoek alleen op naam (server kan later set/collector gebruiken)
+          const res = await fetch(
+            `/api/prices/search?query=${encodeURIComponent(name)}`
+          );
+          const body = await res.json();
+          const items = (body.items ?? []) as Item[];
 
-            keyToCandidates.set(key, items);
+          keyToCandidates.set(key, items);
 
-            if (!items.length) {
-              keyToChosen.set(key, undefined);
-              return;
-            }
-
-            let chosen: Item | undefined;
-
-            // eerst filter op set (als setHint er is)
-            const withSet = setHint
-              ? items.filter(
-                  (it) => (it.set ?? "").toUpperCase() === setHint
-                )
-              : items;
-
-            // dan, als collectorNumber bekend is, proberen daarop te matchen
-            if (collectorNumber) {
-              const collMatches = withSet.filter(
-                (it) =>
-                  (it.collectorNumber ?? "") === collectorNumber
-              );
-              if (collMatches.length) {
-                chosen = collMatches[0];
-              }
-            }
-
-            // anders, als er een setHint is, pak eerste met juiste set
-            if (!chosen && setHint && withSet.length) {
-              chosen = withSet[0];
-            }
-
-            // laatste fallback: simpelweg eerste resultaat
-            if (!chosen) {
-              chosen = items[0];
-            }
-
-            keyToChosen.set(key, chosen);
-          } catch {
-            keyToCandidates.set(key, []);
+          if (!items.length) {
             keyToChosen.set(key, undefined);
+            return;
           }
-        })
-      );
 
-      const resolved: ResolvedLine[] = parsedLines.map((line) => {
-        const key = `${line.name}||${line.setHint ?? ""}||${
-          line.collectorNumber ?? ""
-        }`;
-        const candidates = keyToCandidates.get(key) ?? [];
-        const item = keyToChosen.get(key);
+          let chosen: Item | undefined;
 
-        // standaard cond/foil voor deze regel
-        const lineCond: Condition = globalCond;
-        const lineFoil: boolean = line.foilHint ?? globalFoil;
+          const withSet = setHint
+            ? items.filter((it) => (it.set ?? "").toUpperCase() === setHint)
+            : items;
 
-        if (!item) {
-          return {
-            ...line,
-            candidates,
-            cond: lineCond,
-            foil: lineFoil,
-            status: "no-match",
-            message: "Geen match gevonden",
-          };
+          if (collectorNumber) {
+            const collMatches = withSet.filter(
+              (it) => (it.collectorNumber ?? "") === collectorNumber
+            );
+            if (collMatches.length) {
+              chosen = collMatches[0];
+            }
+          }
+
+          if (!chosen && setHint && withSet.length) {
+            chosen = withSet[0];
+          }
+
+          if (!chosen) {
+            chosen = items[0];
+          }
+
+          keyToChosen.set(key, chosen);
+        } catch {
+          keyToCandidates.set(key, []);
+          keyToChosen.set(key, undefined);
         }
+      })
+    );
 
-        const useFoil = lineFoil;
-        const payout = computeClientPayout(item, lineCond, useFoil);
-        const selectedIndex = candidates.findIndex((c) => c.id === item.id);
+    const resolved: ResolvedLine[] = parsedLines.map((line) => {
+      const key = `${line.name}||${line.setHint ?? ""}||${
+        line.collectorNumber ?? ""
+      }`;
+      const candidates = keyToCandidates.get(key) ?? [];
+      const item = keyToChosen.get(key);
 
-        if (!payout) {
-          return {
-            ...line,
-            item,
-            candidates,
-            selectedIndex: selectedIndex >= 0 ? selectedIndex : undefined,
-            payout: null,
-            cond: lineCond,
-            foil: useFoil,
-            status: "error",
-            message: "Geen payout (not buying)",
-          };
-        }
+      const lineCond: Condition = line.condHint ?? globalCond;
 
+      const lineFoil: boolean = line.foilHint ?? globalFoil;
+
+      if (!item) {
+        return {
+          ...line,
+          candidates,
+          cond: lineCond,
+          foil: lineFoil,
+          status: "no-match",
+          message: "Geen match gevonden",
+        };
+      }
+
+      const useFoil = lineFoil;
+      const payout = computeClientPayout(item, lineCond, useFoil);
+      const selectedIndex = candidates.findIndex((c) => c.id === item.id);
+
+      if (!payout) {
         return {
           ...line,
           item,
           candidates,
           selectedIndex: selectedIndex >= 0 ? selectedIndex : undefined,
-          payout,
+          payout: null,
           cond: lineCond,
           foil: useFoil,
-          status: "ok",
+          status: "error",
+          message: "Geen payout (not buying)",
         };
-      });
+      }
 
-      setRows(resolved);
-    } finally {
-      setLoading(false);
+      return {
+        ...line,
+        item,
+        candidates,
+        selectedIndex: selectedIndex >= 0 ? selectedIndex : undefined,
+        payout,
+        cond: lineCond,
+        foil: useFoil,
+        status: "ok",
+      };
+    });
+
+    setRows(resolved);
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleParseAndMatch() {
+  const parsedLines = parseText(rawText);
+  await resolveParsedLines(parsedLines);
+}
+
+function handleCsvChange(e: ChangeEvent<HTMLInputElement>) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async (evt) => {
+    const text = String(evt.target?.result || "");
+    const parsedLines = parseManaBoxCsv(text);
+    setRawText("");       // optioneel: textarea leegmaken
+    await resolveParsedLines(parsedLines);
+  };
+  reader.readAsText(file);
+}
+
+function downloadSampleCsv() {
+  const blob = new Blob([MANABOX_SAMPLE_CSV], {
+    type: "text/csv;charset=utf-8;",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "arcanafrisia-manabox-example.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+
+// --- CSV helpers (ManaBox) --- //
+
+function splitCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        // escaped quote
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === "," && !inQuotes) {
+      result.push(current);
+      current = "";
+    } else {
+      current += ch;
     }
   }
+  result.push(current);
+  return result;
+}
+
+function mapManaBoxCondition(val: string | null | undefined): Condition | undefined {
+  if (!val) return undefined;
+  const v = val.trim().toLowerCase();
+
+  switch (v) {
+    case "mint":
+    case "near_mint":
+    case "near mint":
+      return "NM";
+    case "excellent":
+      return "EX";
+    case "good":
+      return "GD";
+    case "played":
+    case "heavily_played":
+    case "heavily played":
+      return "PL";
+    case "poor":
+      return "PO";
+    default:
+      return undefined;
+  }
+}
+
+
+function parseManaBoxCsv(text: string): ParsedLine[] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  const result: ParsedLine[] = [];
+  if (!lines.length) return result;
+
+  const headerCells = splitCsvLine(lines[0]);
+  const findIndex = (name: string) =>
+    headerCells.findIndex(
+      (h) => h.trim().toLowerCase() === name.toLowerCase()
+    );
+
+  const idxName = findIndex("Name");
+  const idxSetCode = findIndex("Set code");
+  const idxCollector = findIndex("Collector number");
+  const idxFoil = findIndex("Foil");
+  const idxQty = findIndex("Quantity");
+  const idxCond = findIndex("Condition");
+
+  // Minimaal: een Name-kolom
+  if (idxName === -1) {
+    return result;
+  }
+
+  let id = 1;
+
+  for (let i = 1; i < lines.length; i++) {
+    const raw = lines[i];
+    if (!raw.trim()) continue;
+
+    const cells = splitCsvLine(raw);
+    const name = cells[idxName]?.trim();
+    if (!name) continue;
+
+    const setCode =
+      idxSetCode !== -1 ? cells[idxSetCode]?.trim().toUpperCase() || null : null;
+
+    const collectorNumber =
+      idxCollector !== -1 ? cells[idxCollector]?.trim() || null : null;
+
+    let foilHint: boolean | undefined = undefined;
+    if (idxFoil !== -1) {
+      const foilVal = (cells[idxFoil] || "").trim().toLowerCase();
+      if (foilVal === "foil" || foilVal === "etched") {
+        foilHint = true;
+      } else if (foilVal === "normal" || foilVal === "none") {
+        foilHint = false;
+      }
+    }
+
+    let qty = 1;
+    if (idxQty !== -1) {
+      const q = parseInt((cells[idxQty] || "1").trim(), 10);
+      if (Number.isFinite(q) && q > 0) qty = q;
+    }
+
+    let condHint: Condition | undefined = undefined;
+    if (idxCond !== -1) {
+      condHint = mapManaBoxCondition(cells[idxCond]);
+    }
+
+    result.push({
+      id: id++,
+      raw,
+      qty,
+      name,
+      setHint: setCode,
+      foilHint,
+      collectorNumber,
+      condHint,
+    });
+  }
+
+  return result;
+}
+
+
 
   function addLineToCart(row: ResolvedLine) {
     if (!row.item || !row.payout) return;
@@ -408,14 +594,15 @@ export default function BuyListUploadPage() {
           <div className="af-panel rounded-xl border p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium af-text">
-                Plak hier je lijst (setcode in hoofdletters)
-              </span>
-              <span className="text-xs af-muted">
-                Formaten:{" "}
-                <code className="font-mono">
-                  4 Solitude MH2 Foil / 3x Force of Will / Ancient Tomb / Endurance MH2 #123
-                </code>
-              </span>
+  Plak hier je lijst (decklist, collectie of ManaBox-textexport)
+</span>
+<span className="text-xs af-muted">
+  Formaten:{" "}
+  <code className="font-mono">
+    4 Brainstorm Foil / 3x Endurance SPG #48 / Counterspell (MH2) 267 *F*  
+  </code>
+</span>
+
             </div>
             <textarea
               className="w-full h-64 rounded-md border border-[var(--border)] bg-white p-3 text-sm font-mono text-black placeholder:text-slate-400 outline-none resize-y"
@@ -426,44 +613,88 @@ export default function BuyListUploadPage() {
               onChange={(e) => setRawText(e.target.value)}
             />
 
-            <div className="mt-3 flex flex-wrap items-center gap-3 justify-between">
-              <div className="flex items-center gap-3 text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="af-muted text-xs">Conditie</span>
-                  <select
-                    value={globalCond}
-                    onChange={(e) =>
-                      setGlobalCond(e.target.value as Condition)
-                    }
-                    className="h-8 rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-xs af-text"
-                  >
-                    <option value="NM">NM</option>
-                    <option value="EX">EX</option>
-                    <option value="GD">GD</option>
-                    <option value="PL">PL</option>
-                    <option value="PO">PO</option>
-                  </select>
-                </div>
+            <div className="mt-3 flex flex-wrap items-start gap-4 justify-between">
+  {/* linkerkant: conditie / foil / CSV */}
+  <div className="flex flex-col gap-6 text-sm">
+    {/* Conditie + foil */}
+    <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
+        <span className="af-muted text-xs">Conditie</span>
+        <select
+          value={globalCond}
+          onChange={(e) => setGlobalCond(e.target.value as Condition)}
+          className="h-8 rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-xs af-text"
+        >
+          <option value="NM">NM</option>
+          <option value="EX">EX</option>
+          <option value="GD">GD</option>
+          <option value="PL">PL</option>
+          <option value="PO">PO</option>
+        </select>
+      </div>
 
-                <label className="flex items-center gap-2 text-xs af-muted cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={globalFoil}
-                    onChange={(e) => setGlobalFoil(e.target.checked)}
-                  />
-                  Foil (default)
-                </label>
-              </div>
+      <label className="flex items-center gap-2 text-xs af-muted cursor-pointer">
+        <input
+          type="checkbox"
+          checked={globalFoil}
+          onChange={(e) => setGlobalFoil(e.target.checked)}
+        />
+        Foil (default)
+      </label>
+    </div>
+of:
 
-              <Button
-                onClick={handleParseAndMatch}
-                disabled={loading || !rawText.trim()}
-                className="btn-gold px-4 py-2 text-sm font-semibold"
-              >
-                {loading ? "Matchen…" : "Upload & match"}
-              </Button>
-            </div>
-          </div>
+    {/* CSV upload */}
+    <div className="flex flex-col gap-2 mt-4">
+      <span className="text-xs af-text font-medium">
+        Upload een CSV-lijst
+      </span>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="file"
+          accept=".csv,text/csv"
+          onChange={handleCsvChange}
+          className="text-[11px] af-muted"
+        />
+      </div>
+      <span className="text-[11x] af-muted">
+        Ondersteunt o.a.{" "}
+       <a
+  href="https://manabox.app/"
+  target="_blank"
+  rel="noreferrer"
+  className="af-text underline hover:text-[var(--gold)] transition"
+>
+  ManaBox
+</a>
+{" "}
+        en{" "}
+        <a
+  href="https://tcgpowertools.com/"
+  target="_blank"
+  rel="noreferrer"
+  className="af-text underline hover:text-[var(--gold)] transition"
+>
+  TCGPowerTools
+</a>
+
+        . Minimaal een <code className="font-mono">Name</code>-kolom;
+        andere kolommen zijn optioneel.
+      </span>
+    </div>
+  </div>
+
+  {/* rechterkant: button weer op oude plek */}
+  <Button
+    onClick={handleParseAndMatch}
+    disabled={loading || !rawText.trim()}
+    className="btn-gold px-4 py-2 text-sm font-semibold"
+  >
+    {loading ? "Matchen…" : "Upload & match"}
+  </Button>
+</div>
+</div>
+</div>
 
           {/* kleine summary */}
           <div className="af-panel rounded-xl border p-4 text-sm">
@@ -473,13 +704,13 @@ export default function BuyListUploadPage() {
               <span className="af-text font-semibold">{parsed.length}</span>
             </p>
             <p className="af-muted">
-              Matches:{" "}
+              Matches met payout:{" "}
               <span className="text-emerald-300 font-semibold">
                 {okCount}
               </span>
             </p>
             <p className="af-muted">
-              Geen match:{" "}
+              Niet gevonden:{" "}
               <span className="text-red-300 font-semibold">
                 {noMatchCount}
               </span>
@@ -498,7 +729,7 @@ export default function BuyListUploadPage() {
               toegevoegd.
             </p>
           </div>
-        </div>
+        
 
         {/* result table */}
         {rows.length > 0 && (
