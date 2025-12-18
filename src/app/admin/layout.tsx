@@ -10,6 +10,9 @@ const links = [
   { href: "/admin/inventory", label: "Inventory overview" },
   { href: "/admin/stock-in", label: "Stock in" },
   { href: "/admin/tools/oversell", label: "Oversell" },
+  { href: "/admin/tools/cm-stock-audit", label: "cm-stock-audit" },
+  { href: "/admin/tools/arbitrage", label: "arbitrage" },
+  
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

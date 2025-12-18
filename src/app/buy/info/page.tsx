@@ -411,7 +411,7 @@ export default function BuyInfoPage() {
       </div>
     </details>
 
-    {/* 6. Nieuwe FAQ: sleeves verwijderen */}
+    {/* 6. sleeves verwijderen */}
     <details className="group">
       <summary className="cursor-pointer flex justify-between items-center p-4 font-semibold af-text">
         Waarom moeten sleeves van de kaarten af?
