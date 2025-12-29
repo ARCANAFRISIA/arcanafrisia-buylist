@@ -5,6 +5,8 @@ import prisma from "@/lib/prisma";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import StatusEditor from "../StatusEditor"; // ⬅ vanuit parent-map
+import ItemsEditor from "../ItemsEditor";
+
 
 const euro = (cents: number) => (cents / 100).toFixed(2);
 
@@ -66,6 +68,7 @@ export default async function SubmissionDetailPage({
     .map((item) => {
       const cmId = Number(item.productId);
       const meta = nameById.get(cmId);
+
       const base = meta
         ? `${meta.name}${
             meta.set ? ` [${meta.set.toUpperCase()}]` : ""
@@ -73,7 +76,6 @@ export default async function SubmissionDetailPage({
         : `#${cmId}`;
 
       const cond = (item.condition as string | null) ?? "NM";
-
       const label = `${base}${item.isFoil ? " (Foil)" : ""} • ${cond}`;
 
       return {
@@ -83,9 +85,31 @@ export default async function SubmissionDetailPage({
         qty: item.qty,
         unitCents: Number(item.unitCents ?? 0),
         lineCents: Number(item.lineCents ?? 0),
+        set: meta?.set ?? "",
+        name: meta?.name ?? "",
+        collectorNumber: meta?.collectorNumber ?? "",
       };
     })
-    .sort((a, b) => a.label.localeCompare(b.label));
+
+        .sort((a, b) => {
+      const setA = (a.set || "").toUpperCase();
+      const setB = (b.set || "").toUpperCase();
+      if (setA < setB) return -1;
+      if (setA > setB) return 1;
+
+      const nameA = (a.name || "").toUpperCase();
+      const nameB = (b.name || "").toUpperCase();
+      if (nameA < nameB) return -1;
+      if (nameA > nameB) return 1;
+
+      const collA = (a.collectorNumber || "").toUpperCase();
+      const collB = (b.collectorNumber || "").toUpperCase();
+      if (collA < collB) return -1;
+      if (collA > collB) return 1;
+
+      return 0;
+    });
+
 
   // ---- nette teksten voor payout / shipping ----
   let payoutLine = "Onbekend";
@@ -121,11 +145,13 @@ export default async function SubmissionDetailPage({
     <div className="mx-auto max-w-4xl p-6 text-slate-100">
       <div className="mb-4">
         <Link
-          href="/admin/submissions"
-          className="text-sm text-sky-400 underline"
-        >
-          ← Terug naar overzicht
-        </Link>
+  href="/admin/submissions"
+  className="text-sm text-slate-200 visited:text-slate-200 underline decoration-[#C9A24E]/60 hover:text-[#C9A24E]"
+>
+  ← Terug naar overzicht
+</Link>
+
+
       </div>
 
       <h1 className="text-2xl font-bold mb-1">
@@ -179,45 +205,48 @@ export default async function SubmissionDetailPage({
         </div>
       </div>
 
+      
       {/* ITEMS TABEL */}
-      <h2 className="text-lg font-semibold mb-2">Items</h2>
-      <table className="min-w-full text-sm border border-slate-700 bg-slate-900/60">
-        <thead className="bg-slate-800">
-          <tr>
-            <th className="text-left p-2">Kaart</th>
-            <th className="text-right p-2">Qty</th>
-            <th className="text-right p-2">Unit (€)</th>
-            <th className="text-right p-2">Line (€)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {enriched.map((row) => (
-            <tr key={row.id} className="border-t border-slate-800">
-              <td className="p-2 align-top">
-                {row.label}
-                <div className="text-xs text-slate-500">
-                  #{row.cmId}
-                </div>
-              </td>
-              <td className="p-2 text-right align-top">{row.qty}</td>
-              <td className="p-2 text-right align-top">
-                € {euro(row.unitCents)}
-              </td>
-              <td className="p-2 text-right align-top">
-                € {euro(row.lineCents)}
-              </td>
-            </tr>
-          ))}
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-lg font-semibold">Items</h2>
+<a
+  href={`/api/admin/submissions/${submission.id}/csv`}
+  className="inline-block text-xs px-3 py-1 rounded border border-slate-600 text-slate-200 visited:text-slate-200 hover:border-[#C9A24E] hover:text-[#C9A24E] hover:bg-slate-800 transition-colors underline decoration-[#C9A24E]/60"
+>
+  CSV export
+</a>
 
-          {enriched.length === 0 && (
-            <tr>
-              <td className="p-2" colSpan={4}>
-                Geen items.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+
+
+      </div>
+
+<ItemsEditor
+  submissionId={submission.id}
+  items={submission.items.map((item) => {
+    const cmId = Number(item.productId);
+    const meta = nameById.get(cmId);
+
+    return {
+      id: item.id,
+      cmId,
+      name: item.cardName || meta?.name || `#${cmId}`,
+      set:
+        (meta?.set as string | null) ??
+        ((item.setCode as string | null) ?? null),
+      collectorNumber:
+        item.collectorNumber ||
+        (meta?.collectorNumber as string | null) ||
+        null,
+      condition: (item.condition as string | null) ?? "NM",
+      isFoil: item.isFoil,
+      qty: item.qty,
+      unitCents: Number(item.unitCents ?? 0),
+      lineCents: Number(item.lineCents ?? 0),
+    };
+  })}
+/>
+
+
     </div>
   );
 }

@@ -256,3 +256,17 @@ select:focus option {
   color: #facc6b;
 }
 
+/* Globale link-styling voor dark theme */
+html.dark a {
+  color: #e5e7eb;
+  text-decoration: underline;
+  text-decoration-color: rgba(201, 162, 78, 0.6); /* goudige underline */
+}
+
+html.dark a:visited {
+  color: #e5e7eb;
+}
+
+html.dark a:hover {
+  color: #C9A24E;
+}
