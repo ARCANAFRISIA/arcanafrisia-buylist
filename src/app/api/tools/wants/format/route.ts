@@ -306,22 +306,37 @@ export async function GET(req: Request) {
 
     // ---------- 4) sorteren & trimmen ----------
     candidates.sort((a, b) => {
-      // arbitrage: eerst grootste marge, dan TIX
-      if (format === "arbitrage") {
-        const ma = a.marginPct ?? 0;
-        const mb = b.marginPct ?? 0;
-        if (mb !== ma) return mb - ma;
-      }
-      const ta = a.tix ?? 0;
-      const tb = b.tix ?? 0;
-      if (tb !== ta) return tb - ta;
+  // Arbitrage: marge sorteren
+  if (format === "arbitrage") {
+    const ma = a.marginPct ?? 0;
+    const mb = b.marginPct ?? 0;
+    if (mb !== ma) return mb - ma;
+    const maAbs = a.marginAbs ?? 0;
+    const mbAbs = b.marginAbs ?? 0;
+    if (mbAbs !== maAbs) return mbAbs - maAbs;
+  }
 
-      const ea = a.edhrecRank ?? 999999;
-      const eb = b.edhrecRank ?? 999999;
-      if (ea !== eb) return ea - eb;
+  // Standard: alleen TIX → trend
+  if (format === "standard") {
+    const ta = a.tix ?? 0;
+    const tb = b.tix ?? 0;
+    if (tb !== ta) return tb - ta;
 
-      return b.cardmarketId - a.cardmarketId;
-    });
+    if (b.trend !== a.trend) return b.trend - a.trend;
+    return b.cardmarketId - a.cardmarketId;
+  }
+
+  // Commander & overige: TIX → EDHREC
+  const ta = a.tix ?? 0;
+  const tb = b.tix ?? 0;
+  if (tb !== ta) return tb - ta;
+
+  const ea = a.edhrecRank ?? 999999;
+  const eb = b.edhrecRank ?? 999999;
+  if (ea !== eb) return ea - eb;
+
+  return b.cardmarketId - a.cardmarketId;
+});
 
     const items = candidates.slice(0, maxItems);
 

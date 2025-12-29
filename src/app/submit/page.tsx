@@ -29,6 +29,8 @@ const [paypalEmail, setPaypalEmail] = useState("");
 
 const [shippingMethod, setShippingMethod] = useState<"SELF" | "LABEL">("SELF");
 
+const [acceptTerms, setAcceptTerms] = useState(false);
+
 
 
 
@@ -86,8 +88,15 @@ const handleSubmit = async () => {
       return;
     }
   }
+  if (!acceptTerms) {
+    setError(
+      "Je moet akkoord gaan met de inkoopvoorwaarden."
+    );
+    return;
+  }
 
-    setLoading(true);
+  setLoading(true);
+
 
     try {
       const res = await fetch("/api/cart/submit", {
@@ -112,6 +121,8 @@ body: JSON.stringify({
   meta: {
     clientTotal: total,
     shippingMethod, // "SELF" of "LABEL"
+    termsAcceptedAt: new Date().toISOString(),
+    sellerType: "CONSUMER",
   },
 }),
 
@@ -343,6 +354,40 @@ body: JSON.stringify({
       </span>
     </label>
   </div>
+</div>
+{/* Akkoord met voorwaarden / margeregeling */}
+<div className="mt-6 text-xs sm:text-sm space-y-2">
+  <label className="inline-flex items-start gap-2 cursor-pointer">
+    <input
+      type="checkbox"
+      checked={acceptTerms}
+      onChange={(e) => setAcceptTerms(e.target.checked)}
+      className="mt-1"
+    />
+    <span className="af-text">
+      Ik heb de{" "}
+      <a
+        href="/inkoopvoorwaarden"
+        target="_blank"
+        rel="noreferrer"
+        className="underline text-[#C9A24E]"
+      >
+        inkoopvoorwaarden
+      </a>{" "}
+      en{" "}
+      <a
+        href="/algemene-voorwaarden"
+        target="_blank"
+        rel="noreferrer"
+        className="underline text-[#C9A24E]"
+      >
+        algemene voorwaarden
+      </a>{" "}
+      gelezen en ga hiermee akkoord. Ik verklaar dat ik de kaarten als
+      marge product verkoop en hierover geen btw als voorbelasting heb
+      afgetrokken.
+    </span>
+  </label>
 </div>
 
 

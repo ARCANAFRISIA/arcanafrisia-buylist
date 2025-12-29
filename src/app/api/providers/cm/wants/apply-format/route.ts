@@ -22,7 +22,8 @@ const ARBITRAGE_BANNED_SETS = [
 ];
 
 
-type FormatKey = "commander" | "arbitrage";
+type FormatKey = "commander" | "arbitrage" | "standard";
+
 
 function roundToCents(v: number) {
   return Math.round(v * 100) / 100;
@@ -92,8 +93,13 @@ const CURRENT_COMMANDER_SETS = [
   "cc1","cmr","cm2","cma","j22","jmp","j25","bbd","rex","pip","clu",
 ];
 
+const CURRENT_STANDARD_SETS = [
+  "fdn","woe","lci","mkm","otj","big","blb","dsk","dft","tdm","fin","eoe","spm","tla",
+];
+
+
 async function getCommanderCandidates(maxItems: number) {
-  const minTix = 5;
+  const minTix = 3;
   const minTrend = 1;
   const maxTrend = 100;
 
@@ -217,6 +223,90 @@ async function getCommanderCandidates(maxItems: number) {
 
   return { items, params: { minTix, minTrend, maxTrend } };
 }
+
+async function getStandardCandidates(maxItems: number) {
+  const minTix = 1;
+  const minTrend = 1;
+  const maxTrend = 100;
+
+  const base = await prisma.scryfallLookup.findMany({
+    where: {
+      cardmarketId: { gt: 0 },
+      tix: { gt: minTix },
+      set: { in: CURRENT_STANDARD_SETS }
+    },
+    select: {
+      cardmarketId: true,
+      scryfallId: true,
+      name: true,
+      set: true,
+      collectorNumber: true,
+      rarity: true,
+      tix: true,
+      gameChanger: true,
+      edhrecRank: true
+    },
+    orderBy: [
+      { tix: "desc" },
+      { eur: "desc" },
+      { cardmarketId: "desc" },
+    ],
+    take: maxItems * 4,
+  });
+
+  if (!base.length) {
+    return { items: [], params: { minTix, minTrend, maxTrend } };
+  }
+
+  const ids = base.map((b) => b.cardmarketId!) as number[];
+
+  const guides = await prisma.cMPriceGuide.findMany({
+    where: { cardmarketId: { in: ids } },
+    select: { cardmarketId: true, trend: true }
+  });
+
+  const trendMap = new Map<number, number>();
+  for (const g of guides) {
+    trendMap.set(g.cardmarketId, Number(g.trend ?? 0));
+  }
+
+  const inv = await prisma.inventoryBalance.groupBy({
+    where: { cardmarketId: { in: ids } },
+    by: ["cardmarketId"],
+    _sum: { qtyOnHand: true },
+  });
+
+  const ownMap = new Map(inv.map((x) => [x.cardmarketId!, x._sum.qtyOnHand ?? 0]));
+
+  const pendingMap = await getPendingQtyByCardmarketId(ids);
+
+  const enriched = base
+    .map((b) => {
+      const cmId = b.cardmarketId!;
+      const trend = trendMap.get(cmId) ?? 0;
+      if (trend < minTrend || trend > maxTrend) return null;
+
+      const ownQty = (ownMap.get(cmId) ?? 0) + (pendingMap.get(cmId) ?? 0);
+      const baseCap = trend >= 100 ? 4 : 8;
+      const maxBuy = Math.max(baseCap - ownQty, 0);
+      if (maxBuy <= 0) return null;
+
+      const wishPrice = roundToCents(trend * 0.95);
+
+      return {
+        cardmarketId: cmId,
+        maxBuy,
+        wishPrice,
+        name: b.name,
+        set: b.set,
+        collectorNumber: b.collectorNumber,
+      };
+    })
+    .filter(Boolean) as any[];
+
+  return { items: enriched.slice(0, maxItems), params: { minTix, minTrend, maxTrend } };
+}
+
 
 /**
  * Wantslist helpers
@@ -612,6 +702,29 @@ export async function POST(req: Request) {
           maxBuy: it.maxBuy,
           wishPrice: it.wishPrice,
         }));
+        } else if (format === "standard") {
+  listName = "AF Standard";
+  const res = await getStandardCandidates(maxItems);
+  params = res.params;
+
+  if (!res.items.length) {
+    return NextResponse.json({
+      ok: false,
+      format,
+      listName,
+      message: "Geen geschikte kaarten gevonden voor Standard.",
+      params,
+    });
+  }
+
+  items = res.items
+    .filter((x) => x.maxBuy > 0 && x.wishPrice > 0)
+    .map((x) => ({
+      cardmarketId: x.cardmarketId,
+      maxBuy: x.maxBuy,
+      wishPrice: x.wishPrice,
+    }));
+
     } else if (format === "arbitrage") {
       listName = "AF Arbitrage";
       const res = await getArbitrageCandidates(maxItems);

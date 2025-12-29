@@ -204,3 +204,55 @@ select:focus option {
   color: black;
   background: white;
 }
+
+/* ===== Footer styling ===== */
+
+.af-footer-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.af-footer-sep {
+  margin: 0 0.25rem;
+  font-size: 10px;
+  color: #4b5563; /* iets donkerder grijs */
+}
+
+.af-footer .af-footer-link {
+  color: #c9a24e; /* goud */
+  text-decoration: none;
+  font-weight: 400;
+}
+
+.af-footer .af-footer-link:hover {
+  color: #facc6b;
+  text-decoration: underline;
+}
+
+.af-footer .af-footer-link:visited {
+  color: #c9a24e;
+}
+
+/* ===== Generieke paginestijl + linkkleur voor tekstpagina's ===== */
+
+.af-page main {
+  color: #e5e7eb;
+}
+
+.af-page p,
+.af-page li {
+  color: #d1d5db; /* text-slate-300/400 */
+}
+
+.af-page a.af-page-link {
+  color: #c9a24e;
+  text-decoration: underline;
+}
+
+.af-page a.af-page-link:hover {
+  color: #facc6b;
+}
+
