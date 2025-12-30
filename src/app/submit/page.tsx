@@ -383,9 +383,7 @@ body: JSON.stringify({
       >
         algemene voorwaarden
       </a>{" "}
-      gelezen en ga hiermee akkoord. Ik verklaar dat ik de kaarten als
-      marge product verkoop en hierover geen btw als voorbelasting heb
-      afgetrokken.
+      gelezen en ga hiermee akkoord.
     </span>
   </label>
 </div>
