@@ -64,51 +64,55 @@ export default async function SubmissionDetailPage({
     });
   }
 
-  const enriched = submission.items
-    .map((item) => {
-      const cmId = Number(item.productId);
-      const meta = nameById.get(cmId);
+// items voor de editor in dezelfde sort als de mail: set → naam → collector#
+const itemsForEditor = submission.items
+  .map((item) => {
+    const cmId = Number(item.productId);
+    const meta = nameById.get(cmId);
 
-      const base = meta
-        ? `${meta.name}${
-            meta.set ? ` [${meta.set.toUpperCase()}]` : ""
-          }${meta.collectorNumber ? ` #${meta.collectorNumber}` : ""}`
-        : `#${cmId}`;
+    const set =
+      (meta?.set as string | null) ??
+      ((item.setCode as string | null) ?? null);
 
-      const cond = (item.condition as string | null) ?? "NM";
-      const label = `${base}${item.isFoil ? " (Foil)" : ""} • ${cond}`;
+    const collectorNumber =
+      item.collectorNumber ||
+      (meta?.collectorNumber as string | null) ||
+      null;
 
-      return {
-        id: item.id,
-        label,
-        cmId,
-        qty: item.qty,
-        unitCents: Number(item.unitCents ?? 0),
-        lineCents: Number(item.lineCents ?? 0),
-        set: meta?.set ?? "",
-        name: meta?.name ?? "",
-        collectorNumber: meta?.collectorNumber ?? "",
-      };
-    })
+    const name = item.cardName || meta?.name || `#${cmId}`;
 
-        .sort((a, b) => {
-      const setA = (a.set || "").toUpperCase();
-      const setB = (b.set || "").toUpperCase();
-      if (setA < setB) return -1;
-      if (setA > setB) return 1;
+    return {
+      id: item.id,
+      cmId,
+      name,
+      set,
+      collectorNumber,
+      condition: (item.condition as string | null) ?? "NM",
+      isFoil: item.isFoil,
+      qty: item.qty,
+      unitCents: Number(item.unitCents ?? 0),
+      lineCents: Number(item.lineCents ?? 0),
+    };
+  })
+  .sort((a, b) => {
+    const setA = (a.set || "").toUpperCase();
+    const setB = (b.set || "").toUpperCase();
+    if (setA < setB) return -1;
+    if (setA > setB) return 1;
 
-      const nameA = (a.name || "").toUpperCase();
-      const nameB = (b.name || "").toUpperCase();
-      if (nameA < nameB) return -1;
-      if (nameA > nameB) return 1;
+    const nameA = (a.name || "").toUpperCase();
+    const nameB = (b.name || "").toUpperCase();
+    if (nameA < nameB) return -1;
+    if (nameA > nameB) return 1;
 
-      const collA = (a.collectorNumber || "").toUpperCase();
-      const collB = (b.collectorNumber || "").toUpperCase();
-      if (collA < collB) return -1;
-      if (collA > collB) return 1;
+    const collA = (a.collectorNumber || "").toUpperCase();
+    const collB = (b.collectorNumber || "").toUpperCase();
+    if (collA < collB) return -1;
+    if (collA > collB) return 1;
 
-      return 0;
-    });
+    return 0;
+  });
+
 
 
   // ---- nette teksten voor payout / shipping ----
@@ -222,29 +226,9 @@ export default async function SubmissionDetailPage({
 
 <ItemsEditor
   submissionId={submission.id}
-  items={submission.items.map((item) => {
-    const cmId = Number(item.productId);
-    const meta = nameById.get(cmId);
-
-    return {
-      id: item.id,
-      cmId,
-      name: item.cardName || meta?.name || `#${cmId}`,
-      set:
-        (meta?.set as string | null) ??
-        ((item.setCode as string | null) ?? null),
-      collectorNumber:
-        item.collectorNumber ||
-        (meta?.collectorNumber as string | null) ||
-        null,
-      condition: (item.condition as string | null) ?? "NM",
-      isFoil: item.isFoil,
-      qty: item.qty,
-      unitCents: Number(item.unitCents ?? 0),
-      lineCents: Number(item.lineCents ?? 0),
-    };
-  })}
+  items={itemsForEditor}
 />
+
 
 
     </div>

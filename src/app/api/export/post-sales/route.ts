@@ -48,31 +48,66 @@ const effectiveSince =
   : new Date(Date.now() - 24 * 60 * 60 * 1000); // fallback 24h
 
 
-  async function lastSoldUnitPrice(
+async function lastSoldUnitPrice(
   cmid: number,
   isFoil: boolean,
   condition: string,
   language: string,
   sinceDate: Date
 ) {
-  const row = await prisma.salesLog.findFirst({
-    where: {
-      cardmarketId: cmid,
-      isFoil,
-      condition,
-      language, // ✅ zelfde taal
-      inventoryAppliedAt: { not: null },
-      ts: { gte: sinceDate },
-    },
-    select: { unitPriceEur: true, lineTotalEur: true, qty: true, ts: true },
-    orderBy: { ts: "desc" },
-  });
+  // zelfde buckets als in de aggregate-query
+  const normCond = (condition || "NM").toUpperCase();
+  const normLang = (language || "EN").toUpperCase();
+
+  type Row = {
+    unitPriceEur: number | null;
+    lineTotalEur: number | null;
+    qty: number | null;
+  };
+
+  const rows = await prisma.$queryRawUnsafe<Row[]>(`
+    SELECT "unitPriceEur","lineTotalEur","qty"
+    FROM "SalesLog"
+    WHERE "cardmarketId" = $1
+      AND COALESCE("isFoil", false) = $2
+      AND
+        CASE
+          WHEN "condition" IS NULL                     THEN 'NM'
+          WHEN "condition" ILIKE 'Near Mint'           THEN 'NM'
+          WHEN "condition" ILIKE 'Slightly Played'     THEN 'EX'
+          WHEN "condition" ILIKE 'Moderately Played'   THEN 'GD'
+          WHEN "condition" ILIKE 'Played'              THEN 'LP'
+          WHEN "condition" ILIKE 'Heavily Played'      THEN 'PL'
+          WHEN "condition" ILIKE 'NM'                  THEN 'NM'
+          WHEN "condition" ILIKE 'EX'                  THEN 'EX'
+          WHEN "condition" ILIKE 'GD'                  THEN 'GD'
+          WHEN "condition" ILIKE 'LP'                  THEN 'LP'
+          WHEN "condition" ILIKE 'PL'                  THEN 'PL'
+          ELSE UPPER("condition")
+        END = $3
+      AND
+        CASE
+          WHEN "language" IS NULL OR "language" = ''  THEN 'EN'
+          ELSE UPPER("language")
+        END = $4
+      AND "inventoryAppliedAt" IS NOT NULL
+      AND ts >= $5
+    ORDER BY ts DESC
+    LIMIT 1
+  `, cmid, isFoil, normCond, normLang, sinceDate as any);
+
+  const row = rows[0];
   if (!row) return null;
-  if (row.unitPriceEur != null) return Number(row.unitPriceEur);
-  if (row.lineTotalEur != null && row.qty)
+
+  if (row.unitPriceEur != null) {
+    return Number(row.unitPriceEur);
+  }
+  if (row.lineTotalEur != null && row.qty) {
     return Number(row.lineTotalEur) / Math.abs(Number(row.qty));
+  }
   return null;
 }
+
 
 
 
@@ -196,47 +231,94 @@ const newStockMap = new Map<string, number>();
 
 
   // Price refs (CM trend)
-  const cmIds = Array.from(new Set(balances.map(b => b.cardmarketId)));
-  const cmTrendMap = new Map<number, number>();
-  if (cmIds.length) {
-    const rows: Array<{ cardmarketId: number; trend: number | null }> =
-      await prisma.$queryRawUnsafe(`
-        SELECT "cardmarketId", "trend"
-        FROM "CMPriceGuide"
-        WHERE "cardmarketId" = ANY($1)
-      `, cmIds);
-    rows.forEach(r => {
-      if (r.trend != null) cmTrendMap.set(r.cardmarketId, Number(r.trend));
-    });
-  }
+ const cmIds = Array.from(
+  new Set(
+    balances
+      .map((b) => Number(b.cardmarketId))
+      .filter((n) => Number.isFinite(n))
+  )
+) as number[];
 
-  // CT min via mapping -> CTMarketSummary
-  const mapRows: Array<{ cardmarketId: number; blueprintId: number | null }> =
-    await prisma.$queryRawUnsafe(`
-      SELECT "cardmarketId","blueprintId"
-      FROM "BlueprintMapping"
+if (!cmIds.length) {
+  // Geen data → lege CSV teruggeven
+  return new Response("cardmarketId,isFoil,condition,language,addQty,priceEur,policyName,sourceCode\n", {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="post-sales-${channel}-${Date.now()}.csv"`,
+    },
+  });
+}
+
+const cmTrendMap = new Map<number, number>();
+if (cmIds.length) {
+  const rows = await prisma.$queryRawUnsafe<
+    { cardmarketId: number; trend: any | null }[]
+  >(
+    `
+      SELECT "cardmarketId", "trend"
+      FROM "CMPriceGuide"
       WHERE "cardmarketId" = ANY($1)
-    `, cmIds);
+    `,
+    cmIds
+  );
 
-  const bpByCmid = new Map<number, number>();
-  const bpIds = new Set<number>();
-  mapRows.forEach(r => { if (r.blueprintId != null) { bpByCmid.set(r.cardmarketId, r.blueprintId); bpIds.add(r.blueprintId); } });
-
-  const ctMinMap = new Map<number, number>(); // key: cardmarketId
-  if (bpIds.size) {
-    const rows: Array<{ blueprintId: number; minPrice: number | null }> =
-      await prisma.$queryRawUnsafe(`
-        SELECT "blueprintId","minPrice"
-        FROM "CTMarketSummary"
-        WHERE "blueprintId" = ANY($1)
-      `, Array.from(bpIds));
-    const ctByBp = new Map<number, number>();
-    rows.forEach(r => { if (r.minPrice != null) ctByBp.set(r.blueprintId, Number(r.minPrice)); });
-    for (const [cmid, bp] of bpByCmid.entries()) {
-      const v = ctByBp.get(bp);
-      if (v != null) ctMinMap.set(cmid, v);
+  for (const r of rows) {
+    if (r.trend != null) {
+      cmTrendMap.set(Number(r.cardmarketId), Number(r.trend));
     }
   }
+}
+
+
+  // CT min via mapping -> CTMarketSummary
+const mapRows = await prisma.$queryRawUnsafe<
+  { cardmarketId: number; blueprintId: number | null }[]
+>(
+  `
+    SELECT "cardmarketId","blueprintId"
+    FROM "BlueprintMapping"
+    WHERE "cardmarketId" = ANY($1)
+  `,
+  cmIds
+);
+
+const bpByCmid = new Map<number, number>();
+const bpIds = new Set<number>();
+
+for (const r of mapRows) {
+  if (r.blueprintId != null) {
+    const cmid = Number(r.cardmarketId);
+    const bp = Number(r.blueprintId);
+    bpByCmid.set(cmid, bp);
+    bpIds.add(bp);
+  }
+}
+
+
+const ctMinMap = new Map<number, number>(); // key: cardmarketId
+if (bpIds.size) {
+  const bpArr = Array.from(bpIds) as number[];
+
+  const rows = await prisma.cTMarketSummary.findMany({
+    where: { blueprintId: { in: bpArr } },
+    select: { blueprintId: true, minPrice: true },
+  });
+
+  const ctByBp = new Map<number, number>();
+  for (const r of rows) {
+    if (r.minPrice != null) {
+      ctByBp.set(Number(r.blueprintId), Number(r.minPrice));
+    }
+  }
+
+  for (const [cmid, bp] of bpByCmid.entries()) {
+    const v = ctByBp.get(bp);
+    if (v != null) {
+      ctMinMap.set(cmid, v);
+    }
+  }
+}
+
 
     // CT min per conditie + foil uit CTMarketLatest
   type CtLatestRow = {
