@@ -4,6 +4,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
 import CookieBanner from "@/components/CookieBanner";
+import GoogleAnalytics from "@/components/GoogleAnalytics";
+
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -41,8 +43,11 @@ export default function RootLayout({
   return (
     <html lang="nl" className="dark">
       <body
+      
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background text-foreground flex flex-col`}
       >
+        <GoogleAnalytics gaId="G-YXJ8HRSTDQ" />
+
         {/* Cookie banner (client component) */}
         <CookieBanner />
 
