@@ -1,12 +1,10 @@
+// src/app/api/admin/submissions/[id]/items/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import {
-  computeUnitFromTrend,
-  type CondKey,
-} from "@/lib/buylistEngineCore";
+import { computeUnitFromTrend, type CondKey } from "@/lib/buylistEngineCore";
 
 // helper: BigInt → number safe JSON
 function jsonSafe<T>(obj: T): T {
@@ -22,6 +20,13 @@ function mapCond(raw: any): CondKey {
   }
   return "NM";
 }
+
+function isClientNewId(id: any) {
+  const s = String(id ?? "");
+  return s.startsWith("new-");
+}
+
+const toNumber = (v: any) => (v == null ? null : Number((v as any).toString?.() ?? v));
 
 export async function PATCH(
   req: NextRequest,
@@ -50,37 +55,104 @@ export async function PATCH(
       );
     }
 
-    // bestaande items mappen op id
-    const byId = new Map(
-      submission.items.map((it) => [it.id, it])
-    );
+    // Map input patches snel op id
+    const patchById = new Map<string, any>();
+    for (const p of itemsIn) {
+      if (!p?.id) continue;
+      patchById.set(String(p.id), p);
+    }
 
-    // 1) input toepassen op memory-kopie (qty/cond/foil/collector/cmId)
-    const updatedItems = submission.items.map((it) => {
-      const patch = itemsIn.find((p: any) => p.id === it.id);
-      if (!patch) return it;
+    // --- Bestaande items ---
+    const existingById = new Map<string, (typeof submission.items)[number]>();
+    for (const it of submission.items) existingById.set(it.id, it);
 
-      const cmId = Number(patch.cmId ?? it.productId);
-      return {
-        ...it,
-        productId: BigInt(cmId),
-        qty: Number(patch.qty ?? it.qty),
-        isFoil: Boolean(patch.isFoil ?? it.isFoil),
-        condition: String(patch.condition ?? it.condition ?? "NM"),
-        collectorNumber:
-          (patch.collectorNumber as string | null) ??
-          (it.collectorNumber as string | null) ??
-          null,
-      };
-    });
+    // Opsplitsen in:
+    // - deletes (existing id + qty<=0)
+    // - updates (existing id + qty>0)
+    // - creates (new- id OR isNew true) + qty>0
+    const deletes: string[] = [];
+    const updatesInput: Array<{
+      id: string;
+      cmId: number;
+      qty: number;
+      isFoil: boolean;
+      condition: CondKey;
+      collectorNumber: string | null;
+    }> = [];
 
-    // alle cardmarketIds na wijzigingen
+    const createsInput: Array<{
+      clientId: string; // "new-..."
+      cmId: number;
+      qty: number;
+      isFoil: boolean;
+      condition: CondKey;
+      collectorNumber: string | null;
+      // we nemen ook naam/set hints mee (kan leeg), maar backend zal meta override’en
+      cardNameHint?: string | null;
+      setCodeHint?: string | null;
+    }> = [];
+
+    for (const p of itemsIn) {
+      const pid = String(p?.id ?? "");
+      if (!pid) continue;
+
+      const qty = Number(p.qty ?? 0);
+      const cmId = Number(p.cmId ?? 0);
+      const isFoil = Boolean(p.isFoil);
+      const condition = mapCond(p.condition);
+      const collectorNumber = (p.collectorNumber as string | null) ?? null;
+
+      const wantsCreate = Boolean(p.isNew) || isClientNewId(pid);
+
+      if (wantsCreate) {
+        // split-row: alleen aanmaken als qty>0 en cmId valide
+        if (qty <= 0) continue;
+        if (!Number.isFinite(cmId) || cmId <= 0) continue;
+
+        createsInput.push({
+          clientId: pid,
+          cmId,
+          qty,
+          isFoil,
+          condition,
+          collectorNumber,
+          cardNameHint: (p.name as string | null) ?? null,
+          setCodeHint: (p.set as string | null) ?? (p.setCode as string | null) ?? null,
+        });
+        continue;
+      }
+
+      // update/delete bestaande
+      const existing = existingById.get(pid);
+      if (!existing) {
+        // onbekend id → negeren (veilig)
+        continue;
+      }
+
+      if (qty <= 0) {
+        deletes.push(existing.id);
+        continue;
+      }
+
+      // cmId fallback op bestaande productId
+      const finalCmId = Number.isFinite(cmId) && cmId > 0 ? cmId : Number(existing.productId);
+
+      updatesInput.push({
+        id: existing.id,
+        cmId: finalCmId,
+        qty,
+        isFoil,
+        condition,
+        collectorNumber,
+      });
+    }
+
+    // Universe van cmIds (updates + creates) om pricing/meta in 1x te laden
     const cmIds = Array.from(
-      new Set(
-        updatedItems
-          .map((it) => Number(it.productId))
-          .filter((n) => Number.isFinite(n))
-      )
+      new Set([
+        ...updatesInput.map((u) => u.cmId),
+        ...createsInput.map((c) => c.cmId),
+      ].filter((n) => Number.isFinite(n) && n > 0))
     ) as number[];
 
     // priceguide + eigen voorraad + meta ophalen
@@ -107,9 +179,6 @@ export async function PATCH(
         },
       }),
     ]);
-
-    const toNumber = (v: any) =>
-      v == null ? null : Number((v as any).toString?.() ?? v);
 
     const guideById = new Map<number, { trend: number | null; foilTrend: number | null }>();
     for (const g of guides) {
@@ -146,16 +215,13 @@ export async function PATCH(
       });
     }
 
-    // 2) per item opnieuw prijs uitrekenen
-    let totalCents = 0;
-
-    const updates = [];
-    for (const it of updatedItems) {
-      const cmId = Number(it.productId);
-      const qty = Number(it.qty ?? 0);
-      const isFoil = Boolean(it.isFoil);
-      const condKey = mapCond(it.condition);
-
+    function computePricing(args: {
+      cmId: number;
+      qty: number;
+      isFoil: boolean;
+      condition: CondKey;
+    }) {
+      const { cmId, qty, isFoil, condition } = args;
       const guide = guideById.get(cmId) ?? { trend: null, foilTrend: null };
       const meta = metaById.get(cmId) ?? null;
       const ownQty = ownQtyById.get(cmId) ?? 0;
@@ -164,7 +230,7 @@ export async function PATCH(
         trend: guide.trend,
         trendFoil: guide.foilTrend,
         isFoil,
-        cond: condKey,
+        cond: condition,
         ctx: {
           ownQty,
           edhrecRank: meta?.edhrecRank ?? null,
@@ -173,56 +239,74 @@ export async function PATCH(
         },
       });
 
-      let unitCents = Number(it.unitCents ?? 0);
-      let lineCents = Number(it.lineCents ?? 0);
-      let trendCents: number | null = it.trendCents ?? null;
-      let trendFoilCents: number | null = it.trendFoilCents ?? null;
-      let pctInt: number | null = it.pct ?? null;
+      let unitCents = 0;
+      let lineCents = 0;
+      let trendCents: number | null = null;
+      let trendFoilCents: number | null = null;
+      let pctInt: number | null = null;
 
       if (allowed && unit && unit > 0 && qty > 0) {
         unitCents = Math.round(unit * 100);
         lineCents = unitCents * qty;
-        trendCents =
-          usedTrend != null
-            ? Math.round(usedTrend * 100)
-            : guide.trend != null
-            ? Math.round(guide.trend * 100)
-            : null;
+
+        const used = usedTrend != null ? usedTrend : guide.trend;
+        trendCents = used != null ? Math.round(Number(used) * 100) : null;
         trendFoilCents =
-          guide.foilTrend != null
-            ? Math.round(guide.foilTrend * 100)
-            : null;
+          guide.foilTrend != null ? Math.round(Number(guide.foilTrend) * 100) : null;
         pctInt = Math.round(pct * 100);
       } else {
-        // niet allowed → laat unit maar staan, zet line = unit*qty
-        unitCents = Number(it.unitCents ?? 0);
-        lineCents = unitCents * qty;
+        // not allowed → unit blijft 0, line wordt 0 (strak)
+        unitCents = 0;
+        lineCents = 0;
+        trendCents = guide.trend != null ? Math.round(Number(guide.trend) * 100) : null;
+        trendFoilCents =
+          guide.foilTrend != null ? Math.round(Number(guide.foilTrend) * 100) : null;
+        pctInt = null;
       }
 
-      totalCents += lineCents;
+      return { unitCents, lineCents, trendCents, trendFoilCents, pctInt, meta };
+    }
 
-      const metaName = meta?.name ?? (it as any).cardName ?? null;
-      const metaSet = meta?.set ?? (it as any).setCode ?? null;
-      const metaColl =
-        it.collectorNumber ??
-        meta?.collectorNumber ??
-        ((it as any).collectorNumber as string | null) ??
-        null;
+    // --- Prisma ops bouwen ---
+    const ops: any[] = [];
+    const createClientIds: string[] = []; // parallel met create results indices
 
-      updates.push(
+    // Deletes
+    if (deletes.length) {
+      ops.push(
+        prisma.submissionItem.deleteMany({
+          where: { id: { in: deletes }, submissionId: id },
+        })
+      );
+    }
+
+    // Updates (recalc)
+    for (const u of updatesInput) {
+      const pricing = computePricing({
+        cmId: u.cmId,
+        qty: u.qty,
+        isFoil: u.isFoil,
+        condition: u.condition,
+      });
+
+      const metaName = pricing.meta?.name ?? null;
+      const metaSet = pricing.meta?.set ?? null;
+      const metaColl = u.collectorNumber ?? pricing.meta?.collectorNumber ?? null;
+
+      ops.push(
         prisma.submissionItem.update({
-          where: { id: it.id },
+          where: { id: u.id },
           data: {
-            productId: BigInt(cmId),
-            qty,
-            isFoil,
-            condition: condKey,
+            productId: BigInt(u.cmId),
+            qty: u.qty,
+            isFoil: u.isFoil,
+            condition: u.condition,
             collectorNumber: metaColl,
-            trendCents,
-            trendFoilCents,
-            unitCents,
-            lineCents,
-            pct: pctInt,
+            trendCents: pricing.trendCents,
+            trendFoilCents: pricing.trendFoilCents,
+            unitCents: pricing.unitCents,
+            lineCents: pricing.lineCents,
+            pct: pricing.pctInt,
             cardName: metaName,
             setCode: metaSet,
           },
@@ -230,26 +314,84 @@ export async function PATCH(
       );
     }
 
-    // 3) eerst alle item-updates in één transaction uitvoeren
-    await prisma.$transaction(updates);
+    // Creates (split rows)
+    for (const c of createsInput) {
+      const pricing = computePricing({
+        cmId: c.cmId,
+        qty: c.qty,
+        isFoil: c.isFoil,
+        condition: c.condition,
+      });
 
-    // daarna opnieuw inladen + totals opslaan
-    const [savedItems] = await Promise.all([
-      prisma.submissionItem.findMany({
-        where: { submissionId: id },
-      }),
-      prisma.submission.update({
-        where: { id },
-        data: {
-          serverTotalCents: totalCents,
-          subtotalCents: totalCents,
-        },
-      }),
-    ]);
+      const metaName = pricing.meta?.name ?? c.cardNameHint ?? null;
+      const metaSet = pricing.meta?.set ?? c.setCodeHint ?? null;
+      const metaColl = c.collectorNumber ?? pricing.meta?.collectorNumber ?? null;
 
-    // 4) response payload voor frontend
+      createClientIds.push(c.clientId);
+
+      ops.push(
+        prisma.submissionItem.create({
+          data: {
+            submissionId: id,
+            productId: BigInt(c.cmId),
+            qty: c.qty,
+            isFoil: c.isFoil,
+            condition: c.condition,
+            collectorNumber: metaColl,
+            trendCents: pricing.trendCents,
+            trendFoilCents: pricing.trendFoilCents,
+            unitCents: pricing.unitCents,
+            lineCents: pricing.lineCents,
+            pct: pricing.pctInt,
+            cardName: metaName,
+            setCode: metaSet,
+          },
+        })
+      );
+    }
+
+    // Voer alles uit
+    const results = ops.length ? await prisma.$transaction(ops) : [];
+
+    // Mapping clientId -> new real id (alleen voor creates)
+    // results bevat: [deleteManyResult? , ...updates, ...creates]
+    // We weten niet exact offset, dus berekenen:
+    const deleteOffset = deletes.length ? 1 : 0;
+    const updateCount = updatesInput.length;
+    const createCount = createsInput.length;
+
+    const createdMap: Record<string, string> = {};
+    if (createCount > 0) {
+      const start = deleteOffset + updateCount;
+      for (let i = 0; i < createCount; i++) {
+        const created = results[start + i];
+        const clientId = createClientIds[i];
+        if (created?.id && clientId) createdMap[clientId] = String(created.id);
+      }
+    }
+
+    // Re-load saved items and update totals
+ const savedItems = await prisma.submissionItem.findMany({
+  where: { submissionId: id },
+  orderBy: [{ id: "asc" }], // of helemaal weglaten
+});
+
+
+    const totalCents = savedItems.reduce(
+      (s, it) => s + Number(it.lineCents ?? 0),
+      0
+    );
+
+    await prisma.submission.update({
+      where: { id },
+      data: {
+        serverTotalCents: totalCents,
+        subtotalCents: totalCents,
+      },
+    });
+
+    // Response payload voor frontend
     const respItems = savedItems.map((it) => {
-
       const cmId = Number(it.productId);
       const meta = metaById.get(cmId) ?? null;
       return {
@@ -257,10 +399,7 @@ export async function PATCH(
         cmId,
         name: (it as any).cardName ?? meta?.name ?? `#${cmId}`,
         setCode: (it as any).setCode ?? meta?.set ?? null,
-        collectorNumber:
-          (it as any).collectorNumber ??
-          meta?.collectorNumber ??
-          null,
+        collectorNumber: (it as any).collectorNumber ?? meta?.collectorNumber ?? null,
         condition: (it.condition as string | null) ?? "NM",
         isFoil: it.isFoil,
         qty: it.qty,
@@ -270,7 +409,12 @@ export async function PATCH(
     });
 
     return NextResponse.json(
-      jsonSafe({ ok: true, items: respItems, totalCents })
+      jsonSafe({
+        ok: true,
+        items: respItems,
+        totalCents,
+        createdMap, // 🔥 client new-id -> db id
+      })
     );
   } catch (e: any) {
     console.error("[admin items PATCH] error:", e);

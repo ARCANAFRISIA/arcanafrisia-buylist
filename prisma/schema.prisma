@@ -387,3 +387,20 @@ model ListPolicyTier {
 
   @@index([policyId])
 }
+enum StockClass {
+  CORE
+  REGULAR
+  CTBULK
+
+  @@map("stock_class")
+}
+
+
+model StockPolicy {
+  scryfallId String     @id
+  stockClass StockClass @default(REGULAR)
+  updatedAt  DateTime   @updatedAt
+  createdAt  DateTime   @default(now())
+
+  @@index([stockClass], map: "idx_stockpolicy_class")
+}
