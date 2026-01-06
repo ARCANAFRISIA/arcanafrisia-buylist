@@ -12,6 +12,7 @@ const links = [
   { href: "/admin/tools/oversell", label: "Oversell" },
   { href: "/admin/tools/cm-stock-audit", label: "cm-stock-audit" },
   { href: "/admin/tools/arbitrage", label: "arbitrage" },
+  { href: "/admin/tools/stock-policy", label: "stock policy" },
   
 ];
 

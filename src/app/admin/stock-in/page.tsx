@@ -86,7 +86,10 @@ export default function StockInPage() {
           />
         </div>
         <div className="space-y-2">
-          <label className="text-sm font-medium">Default source date (YYYY-MM-DD)</label>
+          <label className="text-sm font-medium">
+  Default source date (YYYY-MM-DD of DD-MM-YYYY)
+</label>
+
           <Input
             value={defaultSourceDate}
             onChange={(e) => setDefaultSourceDate(e.target.value)}

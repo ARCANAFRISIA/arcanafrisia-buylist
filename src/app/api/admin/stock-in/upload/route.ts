@@ -4,6 +4,32 @@ import prisma from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+function parseSourceDate(input: string | null | undefined): Date | null {
+  const s = (input ?? "").trim();
+  if (!s) return null;
+
+  // YYYY-MM-DD
+  const mIso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (mIso) {
+    const y = Number(mIso[1]);
+    const mo = Number(mIso[2]);
+    const d = Number(mIso[3]);
+    return new Date(Date.UTC(y, mo - 1, d, 0, 0, 0));
+  }
+
+  // DD-MM-YYYY
+  const mEu = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (mEu) {
+    const d = Number(mEu[1]);
+    const mo = Number(mEu[2]);
+    const y = Number(mEu[3]);
+    return new Date(Date.UTC(y, mo - 1, d, 0, 0, 0));
+  }
+
+  return null; // ❌ geen gokken meer
+}
+
+
 type StockInRow = {
   cardmarketId: number;
   isFoil: boolean;
@@ -181,10 +207,9 @@ const missingRequired = required
     let balancesUpserted = 0;
 
     for (const row of parsed) {
-      const when =
-        row.sourceDate && !isNaN(new Date(row.sourceDate).getTime())
-          ? new Date(row.sourceDate)
-          : new Date();
+   const parsedDate = parseSourceDate(row.sourceDate);
+const when = parsedDate ?? new Date(); // fallback = nu
+
 
       const language = row.language || "EN"; // safety
 
