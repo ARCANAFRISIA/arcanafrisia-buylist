@@ -28,7 +28,7 @@ export type EngineResult = {
   allowed: boolean;        // of we deze kaart überhaupt kopen
 };
 
-const MIN_PAYOUT_EUR = 0.20;
+const MIN_PAYOUT_EUR = 0.35;
 
 const COND_CONFIG: Record<
   CondKey,

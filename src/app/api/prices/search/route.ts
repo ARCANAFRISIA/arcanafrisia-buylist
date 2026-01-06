@@ -26,6 +26,7 @@ const CURRENT_STANDARD_SETS = [
   "eoe", // Edge of Eternities
   "spm", // Marvel's Spider-Man
   "tla", // Avatar: The Last Airbender
+  "ecl",
 ];
 
 const CURRENT_PIONEER_SETS = [
@@ -202,6 +203,7 @@ const CURRENT_COMMANDER_SETS = [
 "rex",
 "pip",
 "clu",
+"ecc",
 
 
 ];
