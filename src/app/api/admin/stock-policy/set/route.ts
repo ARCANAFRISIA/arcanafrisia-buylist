@@ -5,7 +5,8 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
-const ALLOWED = new Set(["CORE", "REGULAR", "CTBULK"]);
+const ALLOWED = new Set(["CORE","COMMANDER","REGULAR","CTBULK"]);
+
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);

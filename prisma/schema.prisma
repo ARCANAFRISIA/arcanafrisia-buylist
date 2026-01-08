@@ -389,8 +389,10 @@ model ListPolicyTier {
 }
 enum StockClass {
   CORE
+  COMMANDER
   REGULAR
   CTBULK
+
 
   @@map("stock_class")
 }

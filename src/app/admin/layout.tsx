@@ -13,7 +13,9 @@ const links = [
   { href: "/admin/tools/cm-stock-audit", label: "cm-stock-audit" },
   { href: "/admin/tools/arbitrage", label: "arbitrage" },
   { href: "/admin/tools/stock-policy", label: "stock policy" },
-  
+  { href: "/admin/location/worklist", label: "location worklist" },
+
+
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

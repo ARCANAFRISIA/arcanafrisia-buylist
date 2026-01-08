@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type StockClass = "CORE" | "REGULAR" | "CTBULK";
+type StockClass = "CORE" | "COMMANDER" | "REGULAR" | "CTBULK";
 
 type Row = {
   cardmarketId: number;
@@ -110,7 +110,8 @@ export default function StockPolicyToolPage() {
   }, []);
 
   const counts = useMemo(() => {
-    const c = { CORE: 0, REGULAR: 0, CTBULK: 0 };
+    const c = { CORE: 0, COMMANDER: 0, REGULAR: 0, CTBULK: 0 };
+
     for (const r of rows) c[r.stockClass]++;
     return c;
   }, [rows]);
@@ -214,13 +215,16 @@ export default function StockPolicyToolPage() {
 
     const cls =
       "px-2 py-1 rounded border text-xs whitespace-nowrap " +
-    (active
+  (active
   ? value === "CORE"
     ? "border-yellow-400 bg-yellow-500/20"
+    : value === "COMMANDER"
+    ? "border-emerald-400 bg-emerald-500/20"
     : value === "CTBULK"
     ? "border-orange-400 bg-orange-500/20"
     : "border-zinc-300/40 bg-zinc-500/20"
   : "border-zinc-700 bg-zinc-900 hover:bg-zinc-800");
+
 
 
     return (
@@ -367,11 +371,14 @@ export default function StockPolicyToolPage() {
           <tbody>
   {sorted.map((r, idx) => {
     const rowTint =
-      r.stockClass === "CORE"
-        ? "ring-1 ring-yellow-500/20 bg-yellow-500/5"
-        : r.stockClass === "CTBULK"
-        ? "ring-1 ring-orange-500/20 bg-orange-500/5"
-        : "";
+  r.stockClass === "CORE"
+    ? "ring-1 ring-yellow-500/20 bg-yellow-500/5"
+    : r.stockClass === "COMMANDER"
+    ? "ring-1 ring-emerald-500/20 bg-emerald-500/5"
+    : r.stockClass === "CTBULK"
+    ? "ring-1 ring-orange-500/20 bg-orange-500/5"
+    : "";
+
 
     return (
       <tr
@@ -388,6 +395,12 @@ export default function StockPolicyToolPage() {
       ★
     </span>
   )}
+  {r.stockClass === "COMMANDER" && (
+  <span className="text-emerald-300" title="COMMANDER">
+    ♟
+  </span>
+)}
+
   {r.stockClass === "CTBULK" && (
     <span className="text-orange-300" title="CTBULK">
       ●
@@ -414,6 +427,8 @@ export default function StockPolicyToolPage() {
                 <td className="px-3 py-2">
                   <div className="flex gap-2 justify-end">
                     <ClassButton row={r} label="★ CORE" value="CORE" />
+                    <ClassButton row={r} label="♟ CMD" value="COMMANDER" />
+
                     <ClassButton row={r} label="REG" value="REGULAR" />
                     <ClassButton row={r} label="CTB" value="CTBULK" />
                   </div>
