@@ -18,6 +18,7 @@ type InventoryRow = {
   collectorNumber: string | null;
   imageUrl: string | null;
   sourceCode: string | null;
+  location: string | null;
   cmTrendEur: number | null;
   ctMinEur: number | null;
 };
@@ -79,6 +80,8 @@ export async function GET(req: NextRequest) {
         sf."imageSmall" AS "imageUrl",
 
         firstlot."sourceCode" AS "sourceCode",
+firstlot."location"   AS "location",
+
 
         pg."trend" AS "cmTrendEur",
         ${ctSelect}
@@ -88,17 +91,20 @@ export async function GET(req: NextRequest) {
         ON sf."cardmarketId" = b."cardmarketId"
 
       -- sneller dan correlated subquery (FIFO eerste lot)
-      LEFT JOIN LATERAL (
-        SELECT l."sourceCode"
-        FROM "InventoryLot" l
-        WHERE l."cardmarketId" = b."cardmarketId"
-          AND l."isFoil" = b."isFoil"
-          AND l."condition" = b."condition"
-          AND l."language" = b."language"
-          AND l."qtyRemaining" > 0
-        ORDER BY l."sourceDate" ASC, l."createdAt" ASC
-        LIMIT 1
-      ) firstlot ON true
+ LEFT JOIN LATERAL (
+  SELECT
+    l."sourceCode",
+    l."location"
+  FROM "InventoryLot" l
+  WHERE l."cardmarketId" = b."cardmarketId"
+    AND l."isFoil" = b."isFoil"
+    AND l."condition" = b."condition"
+    AND l."language" = b."language"
+    AND l."qtyRemaining" > 0
+  ORDER BY l."sourceDate" ASC, l."createdAt" ASC
+  LIMIT 1
+) firstlot ON true
+
 
       LEFT JOIN "CMPriceGuide" pg
         ON pg."cardmarketId" = b."cardmarketId"

@@ -18,6 +18,7 @@ type InventoryItem = {
   collectorNumber: string | null;
   imageUrl: string | null;
   sourceCode: string | null;
+  location: string | null;
   cmTrendEur: number | null;
   ctMinEur: number | null;
 };
@@ -249,6 +250,7 @@ export default function InventoryOverviewPage() {
             <th className="p-2 text-right">CM trend</th>
             <th className="p-2 text-right">CT min</th>
             <th className="p-2 text-left">Source</th>
+            <th className="p-2 text-left">Loc</th>
             <th className="p-2 text-left">Last sale</th>
           </tr>
         </thead>
@@ -313,7 +315,7 @@ export default function InventoryOverviewPage() {
                 <td className="p-2 text-right">{formatMoney(item.cmTrendEur)}</td>
                 <td className="p-2 text-right">{formatMoney(item.ctMinEur)}</td>
                 <td className="p-2">{item.sourceCode ?? "-"}</td>
-
+                <td className="p-2 text-xs text-zinc-300">{item.location ?? "-"}</td>
                 <td className="p-2 text-xs">
                   {item.lastSaleAt ? new Date(item.lastSaleAt).toLocaleString("nl-NL") : "-"}
                 </td>
