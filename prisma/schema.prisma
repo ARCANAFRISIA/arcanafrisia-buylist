@@ -344,6 +344,21 @@ model InventoryBalance {
 
 }
 
+model InventoryMutation {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+
+  cardmarketId Int
+  isFoil       Boolean  @default(false)
+  condition    String
+  language     String   @default("EN")
+  delta        Int
+  reason       String?
+
+  @@index([cardmarketId, isFoil, condition, language])
+}
+
+
 model InventoryTxn {
   id            String   @id @default(cuid())
   ts            DateTime @default(now())
