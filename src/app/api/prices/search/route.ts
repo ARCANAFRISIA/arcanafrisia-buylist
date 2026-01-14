@@ -361,7 +361,7 @@ if (formatParam && LEGALITY_KEYS.includes(formatParam)) {
     !!setParam || !!rarityParam || !!formatParam || q.length >= 2;
 
   // basis: 300, maar als gebruiker actief filtert → 500
-  const take = hasFilter ? 500 : 300;
+  const take = hasFilter ? 2500 : 300;
 
   // ------- standaard ORDER BY logica -------
   

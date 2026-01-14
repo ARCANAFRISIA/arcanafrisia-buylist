@@ -26,7 +26,7 @@ function parseSourceDate(input: string | null | undefined): Date | null {
     return new Date(Date.UTC(y, mo - 1, d, 0, 0, 0));
   }
 
-  return null; // ❌ geen gokken meer
+  return null; // ❌ geen gokken
 }
 
 type StockInRow = {
@@ -40,7 +40,22 @@ type StockInRow = {
   language?: string | null;
 };
 
-// heel simpele CSV parser: split op newline + comma/semicolon
+type PickRow = {
+  location: string;
+  set: string;
+  name: string;
+  collectorNumber: string | null;
+  condition: string;
+  language: string;
+  isFoil: boolean;
+  qty: number;
+  cardmarketId: number;
+  sourceCode: string;
+  sourceDate: string; // ISO (UI kan zelf slicen)
+  unitCostEur: number;
+};
+
+// simpele CSV parser: split op newline + comma/semicolon
 function parseCsv(text: string): string[][] {
   const lines = text
     .split(/\r?\n/)
@@ -48,36 +63,29 @@ function parseCsv(text: string): string[][] {
     .filter((l) => l.length > 0);
 
   if (!lines.length) return [];
-
   const sep = lines[0].includes(";") ? ";" : ",";
   return lines.map((line) => line.split(sep).map((p) => p.trim()));
 }
 
-// taal normaliseren uit CSV
 function normalizeLanguageFromCsv(raw: string | null | undefined): string {
   const s = (raw ?? "").toString().trim().toUpperCase();
   if (!s) return "EN";
-
   if (["EN", "ENG", "ENGLISH"].includes(s)) return "EN";
   if (["JA", "JP", "JPN", "JAPANESE"].includes(s)) return "JA";
   if (["DE", "GER", "GERMAN"].includes(s)) return "DE";
-
-  // Onbekend maar wel ingevuld? Laat gewoon zo staan (uppercase).
-  return s;
+  return s; // onbekend maar ingevuld
 }
 
-// ----------------- LOCATION ALLOCATOR -----------------
-
 const ROW_CAPACITY = 900;
+
+// Let op: REGULAR/CTBULK fysieke ranges
 const DRAWER_PRIORITY_REGULAR = ["D", "E", "F", "A", "B", "G", "H", "I", "J"] as const;
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
 
-function parseLoc(
-  loc: string | null | undefined
-): { drawer: string; row: number; batch: number } | null {
+function parseLoc(loc: string | null | undefined): { drawer: string; row: number; batch: number } | null {
   const s = (loc ?? "").trim();
   const m = s.match(/^([A-J])(\d{2})\.(\d{2})$/);
   if (!m) return null;
@@ -85,7 +93,7 @@ function parseLoc(
 }
 
 function rowKey(drawer: string, row: number) {
-  return `${drawer}${pad2(row)}`; // e.g. C01
+  return `${drawer}${pad2(row)}`; // e.g. A04
 }
 
 async function getStockClassByCardmarketId(cardmarketId: number) {
@@ -95,7 +103,6 @@ async function getStockClassByCardmarketId(cardmarketId: number) {
   });
 
   if (!lookup?.scryfallId) {
-    // expliciet gedrag: zonder lookup -> REGULAR
     return { stockClass: "REGULAR" as const, warning: "missing_scryfall_lookup" as const };
   }
 
@@ -109,30 +116,28 @@ async function getStockClassByCardmarketId(cardmarketId: number) {
 }
 
 function allowedRowsForClass(stockClass: "CORE" | "COMMANDER" | "REGULAR" | "CTBULK") {
-  if (stockClass === "CORE") {
-    return [{ drawer: "C", rows: [1, 2] }];
-  }
-  if (stockClass === "COMMANDER") {
-    return [{ drawer: "C", rows: [3, 4, 5, 6] }];
-  }
+  if (stockClass === "CORE") return [{ drawer: "C", rows: [1, 2] }];
+  if (stockClass === "COMMANDER") return [{ drawer: "C", rows: [3, 4, 5, 6] }];
   // REGULAR + CTBULK
   return DRAWER_PRIORITY_REGULAR.map((d) => ({ drawer: d, rows: [1, 2, 3, 4, 5, 6] }));
 }
 
 /**
- * Allocate a *start* location (single loc string) but verify the incomingQty can
- * fit contiguously across subsequent allowed rows (row+1, row+2, ...) if needed.
- *
- * We still store only one location on the lot; overflow is "understood".
+ * Nieuwe “batch-aware” allocator:
+ * - Per request houden we een plan-cache bij: per (stockClass + sourceCode) kiezen we een start row.
+ * - Daarna proberen we contiguous rows (zelfde lade) te vullen voordat we naar een andere lade gaan.
  */
-async function allocateLocation(opts: {
-  stockClass: "CORE" | "COMMANDER" | "REGULAR" | "CTBULK";
-  sourceCode: string;
-  incomingQty: number;
-}) {
-  const groups = allowedRowsForClass(opts.stockClass);
+type StockClass = "CORE" | "COMMANDER" | "REGULAR" | "CTBULK";
 
-  // Load all existing lots with location (global load)
+type AllocState = {
+  startByGroup: Map<string, { drawer: string; row: number }>;
+  reservedByRow: Map<string, number>; // rowKey -> qty
+  batchByRowAndSource: Map<string, number>; // `${rowKey}|${sourceCode}` -> batch
+  maxBatchByRow: Map<string, number>;
+  usedByRow: Map<string, number>;
+};
+
+async function buildAllocState(): Promise<AllocState> {
   const lots = await prisma.inventoryLot.findMany({
     where: {
       location: { not: null },
@@ -141,80 +146,150 @@ async function allocateLocation(opts: {
     select: { location: true, qtyRemaining: true, sourceCode: true },
   });
 
-  // used per rowKey
   const usedByRow = new Map<string, number>();
-  // batch per (rowKey|sourceCode) (reuse if exists)
   const batchByRowAndSource = new Map<string, number>();
-  // max batch per rowKey
   const maxBatchByRow = new Map<string, number>();
 
   for (const l of lots) {
     const p = parseLoc(l.location);
     if (!p) continue;
-
     const rk = rowKey(p.drawer, p.row);
+
     usedByRow.set(rk, (usedByRow.get(rk) ?? 0) + Number(l.qtyRemaining ?? 0));
     maxBatchByRow.set(rk, Math.max(maxBatchByRow.get(rk) ?? 0, p.batch));
 
-    if ((l.sourceCode ?? "") === opts.sourceCode) {
-      const key = `${rk}|${opts.sourceCode}`;
+    const sc = (l.sourceCode ?? "").trim();
+    if (sc) {
+      const key = `${rk}|${sc}`;
       const existing = batchByRowAndSource.get(key);
       if (existing == null || p.batch < existing) batchByRowAndSource.set(key, p.batch);
     }
   }
 
-  // Helper: does qty fit from a start row across contiguous rows within the same group?
-  function fitsContiguously(drawer: string, rows: number[], startIndex: number, qty: number) {
-    let remaining = qty;
-
-    for (let i = startIndex; i < rows.length; i++) {
-      const r = rows[i];
-      const rk = rowKey(drawer, r);
-      const used = usedByRow.get(rk) ?? 0;
-      const free = Math.max(0, ROW_CAPACITY - used);
-
-      if (free <= 0) continue;
-
-      remaining -= free;
-      if (remaining <= 0) return true;
-    }
-
-    return false;
-  }
-
-  // Find first start row where it fits
-  for (const g of groups) {
-    const rows = g.rows;
-
-    for (let idx = 0; idx < rows.length; idx++) {
-      const r = rows[idx];
-      const rk = rowKey(g.drawer, r);
-      const used = usedByRow.get(rk) ?? 0;
-
-      if (used >= ROW_CAPACITY) continue;
-
-      // must fit across this row and subsequent rows (same allowed range)
-      if (!fitsContiguously(g.drawer, rows, idx, opts.incomingQty)) continue;
-
-      // Batch: reuse if same source already exists in *start row*, else next batch
-      const sourceKey = `${rk}|${opts.sourceCode}`;
-      const existingBatch = batchByRowAndSource.get(sourceKey);
-      const batch = existingBatch ?? Math.min(99, (maxBatchByRow.get(rk) ?? 0) + 1);
-
-      if (batch < 1 || batch > 99) continue;
-
-      return `${g.drawer}${pad2(r)}.${pad2(batch)}`; // e.g. C01.03
-    }
-  }
-
-  return null; // not enough contiguous space
+  return {
+    startByGroup: new Map(),
+    reservedByRow: new Map(),
+    batchByRowAndSource,
+    maxBatchByRow,
+    usedByRow,
+  };
 }
 
-// ----------------- ROUTE -----------------
+function getUsedWithReserve(state: AllocState, rk: string) {
+  return (state.usedByRow.get(rk) ?? 0) + (state.reservedByRow.get(rk) ?? 0);
+}
+
+function reserve(state: AllocState, rk: string, qty: number) {
+  state.reservedByRow.set(rk, (state.reservedByRow.get(rk) ?? 0) + qty);
+}
+
+async function allocateLocationForRow(
+  state: AllocState,
+  opts: { stockClass: StockClass; sourceCode: string; qty: number }
+): Promise<string | null> {
+  const groups = allowedRowsForClass(opts.stockClass);
+  const groupKey = `${opts.stockClass}|${opts.sourceCode}`;
+
+  function batchFor(rk: string) {
+    const sourceKey = `${rk}|${opts.sourceCode}`;
+    const existingBatch = state.batchByRowAndSource.get(sourceKey);
+    const batch = existingBatch ?? Math.min(99, (state.maxBatchByRow.get(rk) ?? 0) + 1);
+    if (batch < 1 || batch > 99) return null;
+    state.batchByRowAndSource.set(sourceKey, batch);
+    state.maxBatchByRow.set(rk, Math.max(state.maxBatchByRow.get(rk) ?? 0, batch));
+    return batch;
+  }
+
+  const start = state.startByGroup.get(groupKey);
+
+  if (start) {
+    const g = groups.find((x) => x.drawer === start.drawer);
+    if (g) {
+      const startIdx = g.rows.indexOf(start.row);
+      const rowsForward = startIdx >= 0 ? g.rows.slice(startIdx) : g.rows;
+
+      for (const r of rowsForward) {
+        const rk = rowKey(g.drawer, r);
+        const used = getUsedWithReserve(state, rk);
+        if (used + opts.qty > ROW_CAPACITY) continue;
+        const batch = batchFor(rk);
+        if (batch == null) continue;
+        reserve(state, rk, opts.qty);
+        return `${g.drawer}${pad2(r)}.${pad2(batch)}`;
+      }
+
+      const rowsBefore = startIdx > 0 ? g.rows.slice(0, startIdx) : [];
+      for (const r of rowsBefore) {
+        const rk = rowKey(g.drawer, r);
+        const used = getUsedWithReserve(state, rk);
+        if (used + opts.qty > ROW_CAPACITY) continue;
+        const batch = batchFor(rk);
+        if (batch == null) continue;
+        reserve(state, rk, opts.qty);
+        return `${g.drawer}${pad2(r)}.${pad2(batch)}`;
+      }
+    }
+  }
+
+  for (const g of groups) {
+    for (const r of g.rows) {
+      const rk = rowKey(g.drawer, r);
+      const used = getUsedWithReserve(state, rk);
+      if (used + opts.qty > ROW_CAPACITY) continue;
+
+      state.startByGroup.set(groupKey, { drawer: g.drawer, row: r });
+
+      const batch = batchFor(rk);
+      if (batch == null) continue;
+      reserve(state, rk, opts.qty);
+      return `${g.drawer}${pad2(r)}.${pad2(batch)}`;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Consolidatie binnen dezelfde upload
+ */
+function consolidateRows(rows: StockInRow[]) {
+  type Key = string;
+  const map = new Map<Key, StockInRow>();
+
+  for (const r of rows) {
+    const key = [
+      r.cardmarketId,
+      r.isFoil ? 1 : 0,
+      (r.condition || "").toUpperCase(),
+      (r.language || "EN").toUpperCase(),
+      (r.sourceCode || "UNKNOWN").trim(),
+      (r.sourceDate || "").trim(),
+    ].join("|");
+
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, { ...r });
+      continue;
+    }
+
+    const newQty = prev.qty + r.qty;
+
+    const prevTot = prev.qty * prev.unitCostEur;
+    const addTot = r.qty * r.unitCostEur;
+    const newAvg = newQty > 0 ? (prevTot + addTot) / newQty : prev.unitCostEur;
+
+    map.set(key, {
+      ...prev,
+      qty: newQty,
+      unitCostEur: newAvg,
+    });
+  }
+
+  return Array.from(map.values());
+}
 
 export async function POST(req: NextRequest) {
   try {
-    // Geen extra auth hier – admin UI/middleware beschermt dit al
     const body = await req.json();
     const csvText: string = body.csv;
     const defaultSourceCode: string | null = body.defaultSourceCode ?? null;
@@ -326,40 +401,58 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "no valid rows", errors }, { status: 400 });
     }
 
+    // ✅ consolidate within this upload
+    const consolidated = consolidateRows(parsed);
+
+    // ✅ bulk lookup (name/set/cn) for picklist (based on consolidated ids)
+    const uniqueIds = Array.from(new Set(consolidated.map((r) => r.cardmarketId)));
+    const lookupRows = await prisma.scryfallLookup.findMany({
+      where: { cardmarketId: { in: uniqueIds } },
+      select: { cardmarketId: true, name: true, set: true, collectorNumber: true },
+    });
+    const lookupByCmid = new Map<number, { name: string; set: string; collectorNumber: string | null }>();
+    for (const l of lookupRows) {
+      lookupByCmid.set(Number(l.cardmarketId), {
+        name: l.name,
+        set: l.set,
+        collectorNumber: l.collectorNumber ?? null,
+      });
+    }
+
+    // ✅ allocator state built once per request (performance + stability)
+    const allocState = await buildAllocState();
+
     let lotsCreated = 0;
     let balancesUpserted = 0;
-    const warnings: { line: number; message: string }[] = [];
+    const warnings: string[] = [];
 
-    for (let i = 0; i < parsed.length; i++) {
-      const row = parsed[i];
-      const lineNumber = i + 2; // best-effort (parsed volgt input order)
+    const picklist: PickRow[] = [];
 
+    for (const row of consolidated) {
       const parsedDate = parseSourceDate(row.sourceDate);
-      const when = parsedDate ?? new Date(); // fallback = nu (zoals jij had)
-
+      const when = parsedDate ?? new Date();
       const language = row.language || "EN";
+      const sourceCode = (row.sourceCode ?? "UNKNOWN").trim() || "UNKNOWN";
 
-      // stockClass + location (contiguous fit)
+      // 0) stockClass + location
       const sc = await getStockClassByCardmarketId(row.cardmarketId);
-      if (sc.warning === "missing_scryfall_lookup") {
-        warnings.push({ line: lineNumber, message: `missing ScryfallLookup for cardmarketId=${row.cardmarketId} (treated as REGULAR)` });
-      }
+      if (sc.warning) warnings.push(`${sc.warning}:${row.cardmarketId}`);
 
-      const location = await allocateLocation({
+      const location = await allocateLocationForRow(allocState, {
         stockClass: sc.stockClass,
-        sourceCode: row.sourceCode ?? "UNKNOWN",
-        incomingQty: row.qty,
+        sourceCode,
+        qty: row.qty,
       });
 
       if (!location) {
         errors.push({
-          line: lineNumber,
-          message: `no contiguous location capacity available for ${sc.stockClass} qty=${row.qty}`,
+          line: 0,
+          message: `no location capacity available for ${sc.stockClass} (cardmarketId ${row.cardmarketId})`,
         });
         continue;
       }
 
-      // 1) Lot aanmaken (één location)
+      // 1) Lot create
       await prisma.inventoryLot.create({
         data: {
           cardmarketId: row.cardmarketId,
@@ -369,14 +462,31 @@ export async function POST(req: NextRequest) {
           qtyIn: row.qty,
           qtyRemaining: row.qty,
           avgUnitCostEur: row.unitCostEur,
-          sourceCode: row.sourceCode ?? "UNKNOWN",
+          sourceCode,
           sourceDate: when,
           location,
         },
       });
       lotsCreated++;
 
-      // 2) Balance upsert + gewogen gemiddelde cost
+      // 1b) Picklist row
+      const lu = lookupByCmid.get(row.cardmarketId);
+      picklist.push({
+        location,
+        set: lu?.set ?? "",
+        name: lu?.name ?? "",
+        collectorNumber: lu?.collectorNumber ?? null,
+        condition: row.condition,
+        language,
+        isFoil: row.isFoil,
+        qty: row.qty,
+        cardmarketId: row.cardmarketId,
+        sourceCode,
+        sourceDate: when.toISOString(),
+        unitCostEur: row.unitCostEur,
+      });
+
+      // 2) Balance upsert + weighted avg
       const existing = await prisma.inventoryBalance.findFirst({
         where: {
           cardmarketId: row.cardmarketId,
@@ -392,9 +502,7 @@ export async function POST(req: NextRequest) {
         const newQty = oldQty + row.qty;
 
         const newAvg =
-          newQty > 0
-            ? (oldQty * oldCost + row.qty * row.unitCostEur) / newQty
-            : row.unitCostEur;
+          newQty > 0 ? (oldQty * oldCost + row.qty * row.unitCostEur) / newQty : row.unitCostEur;
 
         await prisma.inventoryBalance.update({
           where: { id: existing.id },
@@ -419,13 +527,26 @@ export async function POST(req: NextRequest) {
       balancesUpserted++;
     }
 
+    // ✅ sort picklist: location → set → name → condition
+    picklist.sort((a, b) => {
+      const lc = a.location.localeCompare(b.location);
+      if (lc !== 0) return lc;
+      const sc = (a.set || "").localeCompare(b.set || "");
+      if (sc !== 0) return sc;
+      const nc = (a.name || "").localeCompare(b.name || "");
+      if (nc !== 0) return nc;
+      return (a.condition || "").localeCompare(b.condition || "");
+    });
+
     return NextResponse.json({
-      ok: errors.length === 0,
+      ok: true,
       rowsParsed: parsed.length,
+      rowsConsolidated: consolidated.length,
       lotsCreated,
       balancesUpserted,
       rowErrors: errors,
       warnings,
+      picklist,
     });
   } catch (e: any) {
     console.error("stock-in upload error", e);

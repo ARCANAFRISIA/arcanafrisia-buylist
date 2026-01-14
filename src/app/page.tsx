@@ -139,22 +139,22 @@ function popularityScore(it: Item): number {
   const isGameChanger = it.gameChanger ?? false;
 
   const isStaple =
-    tix >= 3 || // digitale staple
+    tix >= 2 || // digitale staple
     (edhRank > 0 && edhRank <= 1000) || // top EDH kaarten
     isGameChanger;
 
   // MTGO weging
-  const baseTixWeight = 100;
-  const stapleTixWeight = 300; // hier maak je tix zwaarder
+  const baseTixWeight = 500;
+  const stapleTixWeight = 1000; // hier maak je tix zwaarder
   const tixWeight = isStaple ? stapleTixWeight : baseTixWeight;
 
   const tixScore = tix * tixWeight;
 
   // EDH-score blijft zoals je 'm had
-  const edhScore = edhRank ? 100000 - Math.min(edhRank, 100000) : 0;
+  const edhScore = edhRank ? 1000 - Math.min(edhRank, 1000) : 0;
 
   // los bonusje voor gameChangers
-  const gcBonus = isGameChanger ? 50000 : 0;
+  const gcBonus = isGameChanger ? 2000 : 0;
 
   return tixScore + edhScore + gcBonus;
 }

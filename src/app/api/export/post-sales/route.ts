@@ -464,30 +464,7 @@ if (mode === "newstock") {
 }
 
 
-      if (mode === "relist") {
-        if (soldSince <= 0) continue;
-
-        const tierNow = policy.tiers.find((t) => b.qtyOnHand >= t.minOnHand) || null;
-        const capNow = tierNow?.listQty ?? 0;
-
-        addQty = Math.max(0, Math.min(soldSince, capNow, b.qtyOnHand));
-      } else {
-        // newstock
-        if (newSince <= 0) continue;
-
-        const tierNow = policy.tiers.find((t) => b.qtyOnHand >= t.minOnHand) || null;
-        const capNow = tierNow?.listQty ?? 0;
-
-        const oldOnHand = Math.max(0, b.qtyOnHand - newSince);
-        const tierOld = policy.tiers.find((t) => oldOnHand >= t.minOnHand) || null;
-        const capOld = tierOld?.listQty ?? 0;
-
-        const desiredNow = Math.min(capNow, b.qtyOnHand);
-        const desiredOld = Math.min(capOld, oldOnHand);
-
-        const extraNeeded = Math.max(0, desiredNow - desiredOld);
-        addQty = Math.max(0, Math.min(extraNeeded, newSince, b.qtyOnHand));
-      }
+     
     }
 
     if (addQty <= 0) continue;
