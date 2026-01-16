@@ -49,3 +49,7 @@ next-env.d.ts
 *.sqlite-journal
 
 data/scryfall-default-cards.json
+
+# Local large datasets (never commit)
+src/data/tcgplayer_skus.json
+src/data/tcgplayer_skus_items.ndjson
