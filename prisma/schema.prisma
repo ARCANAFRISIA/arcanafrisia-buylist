@@ -173,6 +173,9 @@ model CMPriceGuideQueue {
 
 model ScryfallLookup {
   cardmarketId    Int      @id
+  tcgplayerId Int?
+@@index([tcgplayerId])
+
   scryfallId      String
   oracleId        String?
   name            String
@@ -418,6 +421,45 @@ model StockPolicy {
   stockClass StockClass @default(REGULAR)
   updatedAt  DateTime   @updatedAt
   createdAt  DateTime   @default(now())
+  sypHot Boolean @default(false)
+
+@@index([sypHot], map: "idx_stockpolicy_syphot")
+
 
   @@index([stockClass], map: "idx_stockpolicy_class")
 }
+
+model SypDemand {
+  tcgplayerId     Int      @id        // dit blijft skuId (zoals in export)
+  tcgProductId    Int?     // NEW: legacy productId (matcht met Scryfall tcgplayerId)
+
+  category        String
+  productName     String
+  setName         String?
+  collectorNumber String?
+  rarity          String?
+  condition       String?
+  marketPrice     Decimal?
+  maxQty          Int
+
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  @@index([maxQty])
+  @@index([tcgProductId])
+  @@index([tcgProductId, maxQty])
+}
+
+model TcgSkuMap {
+  skuId      Int    @id
+  productId  Int
+  condition  String?
+  language   String?
+  printing   String?
+
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
+
+  @@index([productId])
+}
+

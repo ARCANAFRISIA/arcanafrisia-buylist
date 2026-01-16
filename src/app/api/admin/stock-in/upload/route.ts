@@ -1,8 +1,19 @@
+// src/app/api/admin/stock-in/upload/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+/**
+ * ✅ Auto-CTBULK threshold (CM trend)
+ * - Als GEEN StockPolicy bestaat, dan:
+ *   - CM trend < 0.48 => CTBULK
+ *   - CM trend >= 0.48 => REGULAR
+ * - SYP-hot (maxQty>=10) blijft altijd REGULAR (nooit CTBULK)
+ * - Als er WEL StockPolicy is: die wint altijd (CORE/COMMANDER/REGULAR/CTBULK)
+ */
+const MIN_REGULAR_TREND_EUR = 0.48;
 
 function parseSourceDate(input: string | null | undefined): Date | null {
   const s = (input ?? "").trim();
@@ -96,30 +107,73 @@ function rowKey(drawer: string, row: number) {
   return `${drawer}${pad2(row)}`; // e.g. A04
 }
 
+function allowedRowsForClass(stockClass: "CORE" | "COMMANDER" | "REGULAR" | "CTBULK") {
+  if (stockClass === "CORE") return [{ drawer: "C", rows: [1, 2] }];
+  if (stockClass === "COMMANDER") return [{ drawer: "C", rows: [3, 4, 5, 6] }];
+  // REGULAR + CTBULK
+  return DRAWER_PRIORITY_REGULAR.map((d) => ({ drawer: d, rows: [1, 2, 3, 4, 5, 6] }));
+}
+
 async function getStockClassByCardmarketId(cardmarketId: number) {
   const lookup = await prisma.scryfallLookup.findUnique({
     where: { cardmarketId },
-    select: { scryfallId: true },
+    select: { scryfallId: true, tcgplayerId: true },
   });
 
   if (!lookup?.scryfallId) {
     return { stockClass: "REGULAR" as const, warning: "missing_scryfall_lookup" as const };
   }
 
+  // 1) ✅ SYP fallback: hot => never CTBULK
+  // we match: ScryfallLookup.tcgplayerId -> SypDemand.tcgProductId
+  if (lookup.tcgplayerId != null) {
+    const hot = await prisma.sypDemand.findFirst({
+      where: { tcgProductId: lookup.tcgplayerId, maxQty: { gte: 10 } },
+      select: { tcgProductId: true },
+    });
+
+    if (hot) {
+      return { stockClass: "REGULAR" as const, warning: null as any };
+    }
+  }
+
+  // 2) ✅ Policy wins always
   const pol = await prisma.stockPolicy.findUnique({
     where: { scryfallId: lookup.scryfallId },
     select: { stockClass: true },
   });
 
-  // jouw regel: geen policy => REGULAR
-  return { stockClass: (pol?.stockClass ?? "REGULAR") as any, warning: null as any };
-}
+  if (pol?.stockClass) {
+    return { stockClass: pol.stockClass as any, warning: null as any };
+  }
 
-function allowedRowsForClass(stockClass: "CORE" | "COMMANDER" | "REGULAR" | "CTBULK") {
-  if (stockClass === "CORE") return [{ drawer: "C", rows: [1, 2] }];
-  if (stockClass === "COMMANDER") return [{ drawer: "C", rows: [3, 4, 5, 6] }];
-  // REGULAR + CTBULK
-  return DRAWER_PRIORITY_REGULAR.map((d) => ({ drawer: d, rows: [1, 2, 3, 4, 5, 6] }));
+  // 3) ✅ No policy: use CM trend threshold to decide REGULAR vs CTBULK
+const pg = await prisma.cMPriceGuide.findUnique({
+  where: { cardmarketId },
+  select: { trend: true },
+});
+
+
+  const trend = pg?.trend == null ? null : Number(pg.trend);
+
+  // Als trend ontbreekt: NIET gokken → gewoon REGULAR (jouw stijl)
+  if (trend == null || !Number.isFinite(trend)) {
+    return { stockClass: "REGULAR" as const, warning: "missing_cm_trend" as const };
+  }
+
+  if (trend < MIN_REGULAR_TREND_EUR) {
+    // ✅ Auto CTBULK policy aanmaken zodat exports meteen kloppen
+    await prisma.stockPolicy.upsert({
+      where: { scryfallId: lookup.scryfallId },
+      create: { scryfallId: lookup.scryfallId, stockClass: "CTBULK" as any },
+      update: { stockClass: "CTBULK" as any },
+    });
+
+    return { stockClass: "CTBULK" as const, warning: "auto_ctbulk_by_trend" as const };
+  }
+
+  // jouw regel: geen policy => REGULAR
+  return { stockClass: "REGULAR" as const, warning: null as any };
 }
 
 /**
@@ -355,9 +409,7 @@ export async function POST(req: NextRequest) {
       const unitCost = Number((costRaw || "").replace(",", "."));
 
       const isFoil =
-        foilRaw?.toLowerCase() === "true" ||
-        foilRaw === "1" ||
-        foilRaw?.toLowerCase() === "foil";
+        foilRaw?.toLowerCase() === "true" || foilRaw === "1" || foilRaw?.toLowerCase() === "foil";
 
       const condition = (condRaw || "").toUpperCase().trim();
       const language = normalizeLanguageFromCsv(langRaw);
@@ -424,9 +476,13 @@ export async function POST(req: NextRequest) {
 
     let lotsCreated = 0;
     let balancesUpserted = 0;
-    const warnings: string[] = [];
 
+    const warnings: string[] = [];
     const picklist: PickRow[] = [];
+
+    // stats
+    const classCounts: Record<string, number> = { CORE: 0, COMMANDER: 0, REGULAR: 0, CTBULK: 0 };
+    let autoCtbulk = 0;
 
     for (const row of consolidated) {
       const parsedDate = parseSourceDate(row.sourceDate);
@@ -437,6 +493,8 @@ export async function POST(req: NextRequest) {
       // 0) stockClass + location
       const sc = await getStockClassByCardmarketId(row.cardmarketId);
       if (sc.warning) warnings.push(`${sc.warning}:${row.cardmarketId}`);
+      classCounts[String(sc.stockClass)] = (classCounts[String(sc.stockClass)] ?? 0) + 1;
+      if (sc.warning === "auto_ctbulk_by_trend") autoCtbulk++;
 
       const location = await allocateLocationForRow(allocState, {
         stockClass: sc.stockClass,
@@ -540,10 +598,13 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      minRegularTrendEur: MIN_REGULAR_TREND_EUR,
       rowsParsed: parsed.length,
       rowsConsolidated: consolidated.length,
       lotsCreated,
       balancesUpserted,
+      stockClassCounts: classCounts,
+      autoCtbulk,
       rowErrors: errors,
       warnings,
       picklist,

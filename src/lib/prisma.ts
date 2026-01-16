@@ -1,8 +1,9 @@
+// src/lib/prisma.ts
 import { PrismaClient } from "@prisma/client";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
-export const prisma =
+const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
     log: ["error", "warn"],
@@ -10,5 +11,4 @@ export const prisma =
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
-// ✅ voeg deze regel toe
 export default prisma;
