@@ -75,11 +75,9 @@ function computeClientPayout(
   it: Item,
   pref: { condition: Condition; foil: boolean }
 ): number | null {
+  if (it.maxBuy != null && it.maxBuy <= 0) return null; // ✅ SYP-cap: niks meer kopen
   if (it.cardmarketId == null) return null;
   if (it.trend == null && it.trendFoil == null) return null;
-
-
-
 
   const condKey = conditionToCondKey(pref.condition);
 
@@ -100,9 +98,13 @@ function computeClientPayout(
   return unit;
 }
 
+
   const CONDITIONS: Condition[] = ["NM", "EX", "GD", "PL", "PO"];
 
 function itemIsBuyable(it: Item): boolean {
+  // ✅ SYP-cap / maxBuy-cap: als we niets (meer) inkopen, ook niet "buyable"
+  if (it.maxBuy != null && it.maxBuy <= 0) return false;
+
   if (it.cardmarketId == null && it.trend == null && it.trendFoil == null) {
     return false;
   }

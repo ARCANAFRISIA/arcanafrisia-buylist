@@ -1,19 +1,22 @@
 // src/app/api/admin/stock-in/upload/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { Prisma, StockClass as PrismaStockClass } from "@prisma/client";
+
+
+
+
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 /**
- * ✅ Auto-CTBULK threshold (CM trend)
- * - Als GEEN StockPolicy bestaat, dan:
- *   - CM trend < 0.48 => CTBULK
- *   - CM trend >= 0.48 => REGULAR
- * - SYP-hot (maxQty>=10) blijft altijd REGULAR (nooit CTBULK)
- * - Als er WEL StockPolicy is: die wint altijd (CORE/COMMANDER/REGULAR/CTBULK)
+ * StockClass simplificatie (SYP-based):
+ * - Als card tcgplayerId in SypDemand zit met maxQty >= 10 => sypHot => REGULAR
+ * - Anders => CTBULK
+ * - StockPolicy (REGULAR/CTBULK) kan altijd overrulen
+ * - We vullen lade C ook met normale kaarten (compact)
  */
-const MIN_REGULAR_TREND_EUR = 0.48;
 
 function parseSourceDate(input: string | null | undefined): Date | null {
   const s = (input ?? "").trim();
@@ -62,7 +65,7 @@ type PickRow = {
   qty: number;
   cardmarketId: number;
   sourceCode: string;
-  sourceDate: string; // ISO (UI kan zelf slicen)
+  sourceDate: string; // ISO
   unitCostEur: number;
 };
 
@@ -84,12 +87,12 @@ function normalizeLanguageFromCsv(raw: string | null | undefined): string {
   if (["EN", "ENG", "ENGLISH"].includes(s)) return "EN";
   if (["JA", "JP", "JPN", "JAPANESE"].includes(s)) return "JA";
   if (["DE", "GER", "GERMAN"].includes(s)) return "DE";
-  return s; // onbekend maar ingevuld
+  return s;
 }
 
 const ROW_CAPACITY = 900;
 
-// Let op: REGULAR/CTBULK fysieke ranges
+// fysieke ranges (we vullen C ook)
 const DRAWER_PRIORITY_REGULAR = ["D", "E", "F", "A", "B", "G", "H", "I", "J"] as const;
 
 function pad2(n: number) {
@@ -107,11 +110,12 @@ function rowKey(drawer: string, row: number) {
   return `${drawer}${pad2(row)}`; // e.g. A04
 }
 
-function allowedRowsForClass(stockClass: "CORE" | "COMMANDER" | "REGULAR" | "CTBULK") {
-  if (stockClass === "CORE") return [{ drawer: "C", rows: [1, 2] }];
-  if (stockClass === "COMMANDER") return [{ drawer: "C", rows: [3, 4, 5, 6] }];
-  // REGULAR + CTBULK
-  return DRAWER_PRIORITY_REGULAR.map((d) => ({ drawer: d, rows: [1, 2, 3, 4, 5, 6] }));
+type StockClass = "REGULAR" | "CTBULK";
+
+function allowedRowsForClass(_stockClass: StockClass) {
+  // C eerst (compact), daarna rest
+  const DRAWER_PRIORITY = ["C", ...DRAWER_PRIORITY_REGULAR] as const;
+  return DRAWER_PRIORITY.map((d) => ({ drawer: d, rows: [1, 2, 3, 4, 5, 6] }));
 }
 
 async function getStockClassByCardmarketId(cardmarketId: number) {
@@ -120,100 +124,97 @@ async function getStockClassByCardmarketId(cardmarketId: number) {
     select: { scryfallId: true, tcgplayerId: true },
   });
 
+  // NIET gokken → als we niets weten: REGULAR
   if (!lookup?.scryfallId) {
     return { stockClass: "REGULAR" as const, warning: "missing_scryfall_lookup" as const };
   }
 
-  // 1) ✅ SYP fallback: hot => never CTBULK
-  // we match: ScryfallLookup.tcgplayerId -> SypDemand.tcgProductId
+  // 1) SYP hot? (maxQty >= 10)
+  let sypHot = false;
   if (lookup.tcgplayerId != null) {
-    const hot = await prisma.sypDemand.findFirst({
-      where: { tcgProductId: lookup.tcgplayerId, maxQty: { gte: 10 } },
-      select: { tcgProductId: true },
+    const row = await prisma.sypDemand.findFirst({
+      where: { tcgProductId: lookup.tcgplayerId },
+      select: { maxQty: true },
     });
-
-    if (hot) {
-      return { stockClass: "REGULAR" as const, warning: null as any };
-    }
+    sypHot = (row?.maxQty ?? 0) >= 10;
   }
 
-  // 2) ✅ Policy wins always
+  // 2) StockPolicy override (alleen REGULAR/CTBULK gebruiken)
   const pol = await prisma.stockPolicy.findUnique({
     where: { scryfallId: lookup.scryfallId },
-    select: { stockClass: true },
+    select: { stockClass: true, sypHot: true },
   });
 
-  if (pol?.stockClass) {
-    return { stockClass: pol.stockClass as any, warning: null as any };
+  if (pol?.stockClass === "REGULAR" || pol?.stockClass === "CTBULK") {
+    // update sypHot flag mee (handig voor UI/exports)
+    if (pol.sypHot !== sypHot) {
+      await prisma.stockPolicy.update({
+        where: { scryfallId: lookup.scryfallId },
+        data: { sypHot },
+      });
+    }
+    return { stockClass: pol.stockClass as StockClass, warning: null as any };
   }
 
-  // 3) ✅ No policy: use CM trend threshold to decide REGULAR vs CTBULK
-const pg = await prisma.cMPriceGuide.findUnique({
-  where: { cardmarketId },
-  select: { trend: true },
-});
+  // 3) Default: SYP hot => REGULAR, anders CTBULK
+  const stockClass: PrismaStockClass =
+  sypHot ? PrismaStockClass.REGULAR : PrismaStockClass.CTBULK;
 
 
-  const trend = pg?.trend == null ? null : Number(pg.trend);
 
-  // Als trend ontbreekt: NIET gokken → gewoon REGULAR (jouw stijl)
-  if (trend == null || !Number.isFinite(trend)) {
-    return { stockClass: "REGULAR" as const, warning: "missing_cm_trend" as const };
-  }
 
-  if (trend < MIN_REGULAR_TREND_EUR) {
-    // ✅ Auto CTBULK policy aanmaken zodat exports meteen kloppen
-    await prisma.stockPolicy.upsert({
-      where: { scryfallId: lookup.scryfallId },
-      create: { scryfallId: lookup.scryfallId, stockClass: "CTBULK" as any },
-      update: { stockClass: "CTBULK" as any },
-    });
 
-    return { stockClass: "CTBULK" as const, warning: "auto_ctbulk_by_trend" as const };
-  }
 
-  // jouw regel: geen policy => REGULAR
-  return { stockClass: "REGULAR" as const, warning: null as any };
+  // policy upsert zodat exports/worklist simpel blijven
+  await prisma.stockPolicy.upsert({
+    where: { scryfallId: lookup.scryfallId },
+    create: { scryfallId: lookup.scryfallId, stockClass: stockClass as any, sypHot },
+    update: { stockClass: stockClass as any, sypHot },
+  });
+
+  return { stockClass, warning: null as any };
 }
 
 /**
- * Nieuwe “batch-aware” allocator:
- * - Per request houden we een plan-cache bij: per (stockClass + sourceCode) kiezen we een start row.
- * - Daarna proberen we contiguous rows (zelfde lade) te vullen voordat we naar een andere lade gaan.
+ * Source-aware allocator:
+ * - Prefer rows that already contain the same sourceCode
+ * - Else prefer completely empty rows
+ * - Else fallback to least-mixed, then least-used
  */
-type StockClass = "CORE" | "COMMANDER" | "REGULAR" | "CTBULK";
-
 type AllocState = {
   startByGroup: Map<string, { drawer: string; row: number }>;
-  reservedByRow: Map<string, number>; // rowKey -> qty
-  batchByRowAndSource: Map<string, number>; // `${rowKey}|${sourceCode}` -> batch
+  reservedByRow: Map<string, number>;
+  batchByRowAndSource: Map<string, number>;
   maxBatchByRow: Map<string, number>;
   usedByRow: Map<string, number>;
+  sourcesByRow: Map<string, Set<string>>;
 };
 
 async function buildAllocState(): Promise<AllocState> {
   const lots = await prisma.inventoryLot.findMany({
-    where: {
-      location: { not: null },
-      qtyRemaining: { gt: 0 },
-    },
+    where: { location: { not: null }, qtyRemaining: { gt: 0 } },
     select: { location: true, qtyRemaining: true, sourceCode: true },
   });
 
   const usedByRow = new Map<string, number>();
   const batchByRowAndSource = new Map<string, number>();
   const maxBatchByRow = new Map<string, number>();
+  const sourcesByRow = new Map<string, Set<string>>();
 
   for (const l of lots) {
     const p = parseLoc(l.location);
     if (!p) continue;
-    const rk = rowKey(p.drawer, p.row);
 
+    const rk = rowKey(p.drawer, p.row);
     usedByRow.set(rk, (usedByRow.get(rk) ?? 0) + Number(l.qtyRemaining ?? 0));
     maxBatchByRow.set(rk, Math.max(maxBatchByRow.get(rk) ?? 0, p.batch));
 
     const sc = (l.sourceCode ?? "").trim();
     if (sc) {
+      const set = sourcesByRow.get(rk) ?? new Set<string>();
+      set.add(sc);
+      sourcesByRow.set(rk, set);
+
       const key = `${rk}|${sc}`;
       const existing = batchByRowAndSource.get(key);
       if (existing == null || p.batch < existing) batchByRowAndSource.set(key, p.batch);
@@ -226,6 +227,7 @@ async function buildAllocState(): Promise<AllocState> {
     batchByRowAndSource,
     maxBatchByRow,
     usedByRow,
+    sourcesByRow,
   };
 }
 
@@ -235,6 +237,19 @@ function getUsedWithReserve(state: AllocState, rk: string) {
 
 function reserve(state: AllocState, rk: string, qty: number) {
   state.reservedByRow.set(rk, (state.reservedByRow.get(rk) ?? 0) + qty);
+}
+
+function canFit(state: AllocState, rk: string, qty: number) {
+  return getUsedWithReserve(state, rk) + qty <= ROW_CAPACITY;
+}
+
+function pickCandidate(state: AllocState, candidates: Array<{ drawer: string; row: number }>, qty: number) {
+  for (const c of candidates) {
+    const rk = rowKey(c.drawer, c.row);
+    if (!canFit(state, rk, qty)) continue;
+    return c;
+  }
+  return null;
 }
 
 async function allocateLocationForRow(
@@ -249,58 +264,62 @@ async function allocateLocationForRow(
     const existingBatch = state.batchByRowAndSource.get(sourceKey);
     const batch = existingBatch ?? Math.min(99, (state.maxBatchByRow.get(rk) ?? 0) + 1);
     if (batch < 1 || batch > 99) return null;
+
     state.batchByRowAndSource.set(sourceKey, batch);
     state.maxBatchByRow.set(rk, Math.max(state.maxBatchByRow.get(rk) ?? 0, batch));
     return batch;
   }
 
-  const start = state.startByGroup.get(groupKey);
+  const allCandidates: Array<{ drawer: string; row: number }> = [];
+  for (const g of groups) for (const r of g.rows) allCandidates.push({ drawer: g.drawer, row: r });
 
-  if (start) {
-    const g = groups.find((x) => x.drawer === start.drawer);
-    if (g) {
-      const startIdx = g.rows.indexOf(start.row);
-      const rowsForward = startIdx >= 0 ? g.rows.slice(startIdx) : g.rows;
+  // 1) prefer same source already in row
+  const sourceCandidates = allCandidates.filter((c) => {
+    const rk = rowKey(c.drawer, c.row);
+    return state.sourcesByRow.get(rk)?.has(opts.sourceCode) ?? false;
+  });
 
-      for (const r of rowsForward) {
-        const rk = rowKey(g.drawer, r);
-        const used = getUsedWithReserve(state, rk);
-        if (used + opts.qty > ROW_CAPACITY) continue;
-        const batch = batchFor(rk);
-        if (batch == null) continue;
-        reserve(state, rk, opts.qty);
-        return `${g.drawer}${pad2(r)}.${pad2(batch)}`;
-      }
+  let chosen = pickCandidate(state, sourceCandidates, opts.qty);
 
-      const rowsBefore = startIdx > 0 ? g.rows.slice(0, startIdx) : [];
-      for (const r of rowsBefore) {
-        const rk = rowKey(g.drawer, r);
-        const used = getUsedWithReserve(state, rk);
-        if (used + opts.qty > ROW_CAPACITY) continue;
-        const batch = batchFor(rk);
-        if (batch == null) continue;
-        reserve(state, rk, opts.qty);
-        return `${g.drawer}${pad2(r)}.${pad2(batch)}`;
-      }
-    }
-  }
-
-  for (const g of groups) {
-    for (const r of g.rows) {
-      const rk = rowKey(g.drawer, r);
+  // 2) else empty rows
+  if (!chosen) {
+    const emptyCandidates = allCandidates.filter((c) => {
+      const rk = rowKey(c.drawer, c.row);
       const used = getUsedWithReserve(state, rk);
-      if (used + opts.qty > ROW_CAPACITY) continue;
-
-      state.startByGroup.set(groupKey, { drawer: g.drawer, row: r });
-
-      const batch = batchFor(rk);
-      if (batch == null) continue;
-      reserve(state, rk, opts.qty);
-      return `${g.drawer}${pad2(r)}.${pad2(batch)}`;
-    }
+      const sources = state.sourcesByRow.get(rk);
+      return used === 0 && (!sources || sources.size === 0);
+    });
+    chosen = pickCandidate(state, emptyCandidates, opts.qty);
   }
 
-  return null;
+  // 3) else least mixed then least used
+  if (!chosen) {
+    const ranked = [...allCandidates].sort((a, b) => {
+      const rka = rowKey(a.drawer, a.row);
+      const rkb = rowKey(b.drawer, b.row);
+      const mixA = state.sourcesByRow.get(rka)?.size ?? 0;
+      const mixB = state.sourcesByRow.get(rkb)?.size ?? 0;
+      if (mixA !== mixB) return mixA - mixB;
+      return getUsedWithReserve(state, rka) - getUsedWithReserve(state, rkb);
+    });
+    chosen = pickCandidate(state, ranked, opts.qty);
+  }
+
+  if (!chosen) return null;
+
+  state.startByGroup.set(groupKey, { drawer: chosen.drawer, row: chosen.row });
+
+  const rk = rowKey(chosen.drawer, chosen.row);
+  const batch = batchFor(rk);
+  if (batch == null) return null;
+
+  reserve(state, rk, opts.qty);
+
+  const set = state.sourcesByRow.get(rk) ?? new Set<string>();
+  set.add(opts.sourceCode);
+  state.sourcesByRow.set(rk, set);
+
+  return `${chosen.drawer}${pad2(chosen.row)}.${pad2(batch)}`;
 }
 
 /**
@@ -332,11 +351,7 @@ function consolidateRows(rows: StockInRow[]) {
     const addTot = r.qty * r.unitCostEur;
     const newAvg = newQty > 0 ? (prevTot + addTot) / newQty : prev.unitCostEur;
 
-    map.set(key, {
-      ...prev,
-      qty: newQty,
-      unitCostEur: newAvg,
-    });
+    map.set(key, { ...prev, qty: newQty, unitCostEur: newAvg });
   }
 
   return Array.from(map.values());
@@ -453,10 +468,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "no valid rows", errors }, { status: 400 });
     }
 
-    // ✅ consolidate within this upload
     const consolidated = consolidateRows(parsed);
 
-    // ✅ bulk lookup (name/set/cn) for picklist (based on consolidated ids)
+    // bulk lookup for picklist
     const uniqueIds = Array.from(new Set(consolidated.map((r) => r.cardmarketId)));
     const lookupRows = await prisma.scryfallLookup.findMany({
       where: { cardmarketId: { in: uniqueIds } },
@@ -471,7 +485,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // ✅ allocator state built once per request (performance + stability)
     const allocState = await buildAllocState();
 
     let lotsCreated = 0;
@@ -480,9 +493,7 @@ export async function POST(req: NextRequest) {
     const warnings: string[] = [];
     const picklist: PickRow[] = [];
 
-    // stats
-    const classCounts: Record<string, number> = { CORE: 0, COMMANDER: 0, REGULAR: 0, CTBULK: 0 };
-    let autoCtbulk = 0;
+    const classCounts: Record<string, number> = { REGULAR: 0, CTBULK: 0 };
 
     for (const row of consolidated) {
       const parsedDate = parseSourceDate(row.sourceDate);
@@ -490,11 +501,9 @@ export async function POST(req: NextRequest) {
       const language = row.language || "EN";
       const sourceCode = (row.sourceCode ?? "UNKNOWN").trim() || "UNKNOWN";
 
-      // 0) stockClass + location
       const sc = await getStockClassByCardmarketId(row.cardmarketId);
       if (sc.warning) warnings.push(`${sc.warning}:${row.cardmarketId}`);
       classCounts[String(sc.stockClass)] = (classCounts[String(sc.stockClass)] ?? 0) + 1;
-      if (sc.warning === "auto_ctbulk_by_trend") autoCtbulk++;
 
       const location = await allocateLocationForRow(allocState, {
         stockClass: sc.stockClass,
@@ -510,7 +519,6 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      // 1) Lot create
       await prisma.inventoryLot.create({
         data: {
           cardmarketId: row.cardmarketId,
@@ -527,7 +535,6 @@ export async function POST(req: NextRequest) {
       });
       lotsCreated++;
 
-      // 1b) Picklist row
       const lu = lookupByCmid.get(row.cardmarketId);
       picklist.push({
         location,
@@ -544,7 +551,6 @@ export async function POST(req: NextRequest) {
         unitCostEur: row.unitCostEur,
       });
 
-      // 2) Balance upsert + weighted avg
       const existing = await prisma.inventoryBalance.findFirst({
         where: {
           cardmarketId: row.cardmarketId,
@@ -585,7 +591,6 @@ export async function POST(req: NextRequest) {
       balancesUpserted++;
     }
 
-    // ✅ sort picklist: location → set → name → condition
     picklist.sort((a, b) => {
       const lc = a.location.localeCompare(b.location);
       if (lc !== 0) return lc;
@@ -598,13 +603,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      minRegularTrendEur: MIN_REGULAR_TREND_EUR,
       rowsParsed: parsed.length,
       rowsConsolidated: consolidated.length,
       lotsCreated,
       balancesUpserted,
       stockClassCounts: classCounts,
-      autoCtbulk,
       rowErrors: errors,
       warnings,
       picklist,

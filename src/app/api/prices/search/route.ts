@@ -395,6 +395,7 @@ if (formatParam && LEGALITY_KEYS.includes(formatParam)) {
     where,
     select: {
       cardmarketId: true,
+      tcgplayerId: true,
       scryfallId: true,
       name: true,
       set: true,
@@ -459,6 +460,41 @@ if (formatParam && LEGALITY_KEYS.includes(formatParam)) {
     pendingEntries: Array.from(pendingById.entries()).slice(0, 10),
   });
 
+  // ------- 4c) SYP demand bulk lookup (tcgProductId == ScryfallLookup.tcgplayerId) -------
+const tcgIds = Array.from(
+  new Set(
+    rows.map((r) => (r as any).tcgplayerId).filter((x: any) => x != null)
+  )
+).map((x) => Number(x)).filter((n) => Number.isFinite(n));
+
+const sypByTcg = new Map<number, number>(); // tcgProductId -> maxQty
+if (tcgIds.length) {
+  const sypRows = await prisma.sypDemand.findMany({
+    where: { tcgProductId: { in: tcgIds } },
+    select: { tcgProductId: true, maxQty: true },
+  });
+
+  for (const r of sypRows) {
+  if (r.tcgProductId == null) continue;
+
+  const key = Number(r.tcgProductId);
+  const val = Number(r.maxQty ?? 0);
+
+  const cur = sypByTcg.get(key);
+  if (cur == null || val > cur) {
+    sypByTcg.set(key, val); // neem hoogste maxQty (NM wint van Foil=27)
+  }
+}
+
+}
+
+function sypTargetFromMaxQty(maxQty: number | null | undefined) {
+  if (maxQty == null) return 2; // default als SYP niets weet
+  const t = Math.floor(Number(maxQty) / 10);
+  return t < 0 ? 0 : t;
+}
+
+
   // ------- 5) response opbouwen -------
   const items = rows.map((r) => {
     const cmId = r.cardmarketId ?? null;
@@ -468,11 +504,14 @@ if (formatParam && LEGALITY_KEYS.includes(formatParam)) {
     const ownQtyTotal = ownOnHand + qtyPending;
 
     let maxBuy: number | null = null;
-    const baseTrend = meta?.trend ?? null;
-    if (cmId != null && baseTrend != null && baseTrend > 0) {
-      const baseCap = baseTrend >= 100 ? 4 : 8;
-      maxBuy = Math.max(baseCap - ownQtyTotal, 0);
-    }
+
+if (cmId != null) {
+  const tcg = (r as any).tcgplayerId != null ? Number((r as any).tcgplayerId) : null;
+  const sypMaxQty = tcg != null ? (sypByTcg.get(tcg) ?? null) : null;
+  const target = sypTargetFromMaxQty(sypMaxQty);
+  maxBuy = Math.max(0, target - ownQtyTotal);
+}
+
 
     return {
       id: r.scryfallId,

@@ -1,3 +1,4 @@
+// src/app/api/admin/location/worklist/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
@@ -21,20 +22,16 @@ function parseLoc(loc: string | null | undefined): { drawer: string; row: number
   return { drawer: m[1], row: Number(m[2]), batch: Number(m[3]) };
 }
 
-// CORE: C01-02, COMMANDER: C03-06
-function allowedRowsForClass(stockClass: "CORE" | "COMMANDER") {
-  if (stockClass === "CORE") return [{ drawer: "C", rows: [1, 2] }];
-  return [{ drawer: "C", rows: [3, 4, 5, 6] }];
+function allowedRowsC() {
+  return [{ drawer: "C", rows: [1, 2, 3, 4, 5, 6] }];
 }
 
 async function getRowUsageC() {
-  // usage per C-rowKey (C01..C06) op basis van qtyRemaining
   const rows = await prisma.inventoryLot.findMany({
     where: {
-  qtyRemaining: { gt: 0 },
-  location: { not: null, startsWith: "C" },
-},
-
+      qtyRemaining: { gt: 0 },
+      location: { not: null, startsWith: "C" },
+    },
     select: { location: true, qtyRemaining: true },
   });
 
@@ -51,17 +48,14 @@ async function getRowUsageC() {
   return usedByRow;
 }
 
-function chooseSuggestedLocation(stockClass: "CORE" | "COMMANDER", usedByRow: Map<string, number>) {
-  const groups = allowedRowsForClass(stockClass);
+function chooseSuggestedLocation(usedByRow: Map<string, number>) {
+  const groups = allowedRowsC();
 
   for (const g of groups) {
     for (const r of g.rows) {
       const rk = rowKey(g.drawer, r);
       const used = usedByRow.get(rk) ?? 0;
       if (used >= ROW_CAPACITY) continue;
-
-      // batch voor "suggestion": we kiezen .01 als placeholder.
-      // apply-route mag dit ook handmatig invullen, maar dit is al bruikbaar.
       return `${g.drawer}${pad2(r)}.01`;
     }
   }
@@ -72,7 +66,7 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const includeLots = url.searchParams.get("includeLots") !== "0"; // default true
 
-  // 1) alle balances (CORE/COMMANDER) + qtyOnHand > 0
+  // 1) alle balances + qtyOnHand > 0
   const balances = await prisma.inventoryBalance.findMany({
     where: { qtyOnHand: { gt: 0 } },
     select: { cardmarketId: true, isFoil: true, condition: true, language: true, qtyOnHand: true },
@@ -84,7 +78,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, count: 0, items: [] });
   }
 
-  // 2) cmid -> scryfallId
+  // 2) cmid -> scryfallId + meta
   const lookups = await prisma.scryfallLookup.findMany({
     where: { cardmarketId: { in: cmIds } },
     select: { cardmarketId: true, scryfallId: true, name: true, set: true, collectorNumber: true },
@@ -102,21 +96,25 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // 3) stockpolicy in bulk
+  // 3) stockpolicy in bulk (alleen REGULAR/CTBULK + sypHot)
   const scryIds = Array.from(new Set(Array.from(scryByCmid.values())));
-  const policies = await prisma.stockPolicy.findMany({
-    where: { scryfallId: { in: scryIds } },
-    select: { scryfallId: true, stockClass: true },
-  });
+  const policies = scryIds.length
+    ? await prisma.stockPolicy.findMany({
+        where: { scryfallId: { in: scryIds } },
+        select: { scryfallId: true, stockClass: true, sypHot: true },
+      })
+    : [];
 
-  const classByScry = new Map<string, "CORE" | "COMMANDER" | "REGULAR" | "CTBULK">();
-  for (const p of policies) classByScry.set(p.scryfallId, p.stockClass as any);
+  const polByScry = new Map<string, { stockClass: "REGULAR" | "CTBULK"; sypHot: boolean }>();
+  for (const p of policies) {
+    const sc = (String(p.stockClass).toUpperCase() as any) === "CTBULK" ? "CTBULK" : "REGULAR";
+    polByScry.set(p.scryfallId, { stockClass: sc, sypHot: !!p.sypHot });
+  }
 
   // 4) row usage voor C01..C06
   const usedByRow = await getRowUsageC();
 
-  // 5) lots ophalen (optioneel) voor alle cmIds; alleen als includeLots
-  // we willen lots met qtyRemaining>0, zodat worklist echt pickbaar is
+  // 5) lots ophalen (optioneel)
   const lots = includeLots
     ? await prisma.inventoryLot.findMany({
         where: { cardmarketId: { in: cmIds }, qtyRemaining: { gt: 0 } },
@@ -145,7 +143,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // 6) build items for CORE/COMMANDER only
+  // 6) build items (alles)
   const items: any[] = [];
 
   for (const b of balances) {
@@ -153,11 +151,10 @@ export async function GET(req: NextRequest) {
     const scry = scryByCmid.get(cmid);
     if (!scry) continue;
 
-    const stockClass = classByScry.get(scry) ?? "REGULAR";
-    if (stockClass !== "CORE" && stockClass !== "COMMANDER") continue;
-
     const meta = metaByCmid.get(cmid);
     if (!meta) continue;
+
+    const pol = polByScry.get(scry) ?? { stockClass: "REGULAR" as const, sypHot: false };
 
     const cond = (b.condition || "NM").toUpperCase();
     const lang = (b.language || "EN").toUpperCase();
@@ -168,7 +165,7 @@ export async function GET(req: NextRequest) {
       new Set(skuLots.map((l) => (l.location ?? "").trim()).filter((x) => x.length > 0))
     );
 
-    const suggestedLocation = chooseSuggestedLocation(stockClass, usedByRow);
+    const suggestedLocation = chooseSuggestedLocation(usedByRow);
 
     items.push({
       skuKey,
@@ -180,7 +177,8 @@ export async function GET(req: NextRequest) {
       condition: cond,
       language: lang,
       qtyOnHand: Number(b.qtyOnHand ?? 0),
-      stockClass,
+      stockClass: pol.stockClass,
+      sypHot: pol.sypHot,
       currentLocations,
       suggestedLocation,
       lots: skuLots.map((l) => ({
@@ -193,10 +191,10 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // sort: CORE first then COMMANDER, then name
+  // sort: CTBULK first (handig om bulk te fixen), daarna naam
   items.sort((a, b) => {
-    const ca = a.stockClass === "CORE" ? 0 : 1;
-    const cb = b.stockClass === "CORE" ? 0 : 1;
+    const ca = a.stockClass === "CTBULK" ? 0 : 1;
+    const cb = b.stockClass === "CTBULK" ? 0 : 1;
     if (ca !== cb) return ca - cb;
     return String(a.name).localeCompare(String(b.name));
   });

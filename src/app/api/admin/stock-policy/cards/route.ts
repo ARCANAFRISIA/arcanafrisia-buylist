@@ -1,3 +1,4 @@
+// src/app/api/admin/stock-policy/cards/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,9 +18,7 @@ export async function GET(req: NextRequest) {
   const cards = await prisma.scryfallLookup.findMany({
     where: {
       set,
-      ...(q
-        ? { name: { contains: q, mode: "insensitive" } }
-        : {}),
+      ...(q ? { name: { contains: q, mode: "insensitive" } } : {}),
     },
     select: {
       cardmarketId: true,
@@ -43,19 +42,25 @@ export async function GET(req: NextRequest) {
   const policies = ids.length
     ? await prisma.stockPolicy.findMany({
         where: { scryfallId: { in: ids } },
-        select: { scryfallId: true, stockClass: true },
+        select: { scryfallId: true, stockClass: true, sypHot: true },
       })
     : [];
 
-  const map = new Map(policies.map((p) => [p.scryfallId, p.stockClass]));
+  const map = new Map(policies.map((p) => [p.scryfallId, String(p.stockClass).toUpperCase()]));
+  const hotMap = new Map(policies.map((p) => [p.scryfallId, !!p.sypHot]));
 
   return NextResponse.json({
     ok: true,
     set,
     count: cards.length,
-    cards: cards.map((c) => ({
-      ...c,
-      stockClass: map.get(c.scryfallId) ?? "REGULAR",
-    })),
+    cards: cards.map((c) => {
+      const sc = map.get(c.scryfallId);
+      const stockClass = sc === "CTBULK" ? "CTBULK" : "REGULAR";
+      return {
+        ...c,
+        stockClass,
+        sypHot: hotMap.get(c.scryfallId) ?? false,
+      };
+    }),
   });
 }

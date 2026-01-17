@@ -1,3 +1,4 @@
+// src/app/api/admin/stock-policy/set/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -5,8 +6,7 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
-const ALLOWED = new Set(["CORE","COMMANDER","REGULAR","CTBULK"]);
-
+const ALLOWED = new Set(["REGULAR", "CTBULK"]);
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
 
   if (!scryfallId || !ALLOWED.has(stockClass)) {
     return NextResponse.json(
-      { ok: false, error: "Invalid payload. Need { scryfallId, stockClass }" },
+      { ok: false, error: "Invalid payload. Need { scryfallId, stockClass } where stockClass is REGULAR or CTBULK" },
       { status: 400 }
     );
   }
