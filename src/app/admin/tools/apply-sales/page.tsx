@@ -1,10 +1,11 @@
 "use client";
 import { useState } from "react";
-// keep the components you DO have
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export default function ApplySalesTool() {
+  const [account, setAccount] = useState<"MAIN" | "CTBULK">("MAIN");
+
   const [limit, setLimit] = useState("250");
   const [simulate, setSimulate] = useState(true);
   const [since, setSince] = useState("");
@@ -20,7 +21,11 @@ export default function ApplySalesTool() {
       p.set("simulate", simulate ? "1" : "0");
       if (since) p.set("since", since);
 
-      const res = await fetch(`/api/admin/apply-sales?${p.toString()}`, { method: "POST" });
+      const endpoint = account === "CTBULK"
+        ? "/api/admin/apply-sales-ctbulk"
+        : "/api/admin/apply-sales";
+
+      const res = await fetch(`${endpoint}?${p.toString()}`, { method: "POST" });
       const body = await res.json();
       if (!res.ok) throw new Error(JSON.stringify(body));
       setOut(body);
@@ -57,9 +62,26 @@ export default function ApplySalesTool() {
             id="since"
             value={since}
             onChange={e => setSince(e.target.value)}
-            placeholder="2025-11-10T00:00:00Z"
+            placeholder="2026-01-09T21:00:00Z"
           />
         </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant={account === "MAIN" ? "default" : "outline"}
+          onClick={() => setAccount("MAIN")}
+        >
+          MAIN
+        </Button>
+        <Button
+          type="button"
+          variant={account === "CTBULK" ? "default" : "outline"}
+          onClick={() => setAccount("CTBULK")}
+        >
+          CTBULK
+        </Button>
       </div>
 
       <Button onClick={run} disabled={loading} className="min-w-[160px]">

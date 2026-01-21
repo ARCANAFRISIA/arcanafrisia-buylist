@@ -3,10 +3,6 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { Prisma, StockClass as PrismaStockClass } from "@prisma/client";
 
-
-
-
-
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -15,7 +11,6 @@ export const revalidate = 0;
  * - Als card tcgplayerId in SypDemand zit met maxQty >= 10 => sypHot => REGULAR
  * - Anders => CTBULK
  * - StockPolicy (REGULAR/CTBULK) kan altijd overrulen
- * - We vullen lade C ook met normale kaarten (compact)
  */
 
 function parseSourceDate(input: string | null | undefined): Date | null {
@@ -92,32 +87,52 @@ function normalizeLanguageFromCsv(raw: string | null | undefined): string {
 
 const ROW_CAPACITY = 900;
 
-// fysieke ranges (we vullen C ook)
-const DRAWER_PRIORITY_REGULAR = ["D", "E", "F", "A", "B", "G", "H", "I", "J"] as const;
-
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
 
-function parseLoc(loc: string | null | undefined): { drawer: string; row: number; batch: number } | null {
-  const s = (loc ?? "").trim();
-  const m = s.match(/^([A-J])(\d{2})\.(\d{2})$/);
-  if (!m) return null;
-  return { drawer: m[1], row: Number(m[2]), batch: Number(m[3]) };
-}
-
-function rowKey(drawer: string, row: number) {
-  return `${drawer}${pad2(row)}`; // e.g. A04
-}
-
 type StockClass = "REGULAR" | "CTBULK";
 
-function allowedRowsForClass(_stockClass: StockClass) {
-  // C eerst (compact), daarna rest
-  const DRAWER_PRIORITY = ["C", ...DRAWER_PRIORITY_REGULAR] as const;
-  return DRAWER_PRIORITY.map((d) => ({ drawer: d, rows: [1, 2, 3, 4, 5, 6] }));
+type ParsedLoc =
+  | { kind: "MAIN"; drawer: string; row: number; seg: number }
+  | { kind: "CTBULK"; drawer: string; row: number; seg: number };
+
+function parseLoc(loc: string | null | undefined): ParsedLoc | null {
+  const s = (loc ?? "").trim();
+
+  // CTBULK: CB-A01.01
+  let m = s.match(/^CB-([A-H])(\d{2})\.(\d{2})$/i);
+  if (m) {
+    return { kind: "CTBULK", drawer: m[1].toUpperCase(), row: Number(m[2]), seg: Number(m[3]) };
+  }
+
+  // MAIN: A01.01
+  m = s.match(/^([A-J])(\d{2})\.(\d{2})$/i);
+  if (m) {
+    return { kind: "MAIN", drawer: m[1].toUpperCase(), row: Number(m[2]), seg: Number(m[3]) };
+  }
+
+  return null;
 }
 
+function rowKey(kind: "MAIN" | "CTBULK", drawer: string, row: number) {
+  return `${kind}|${drawer}${pad2(row)}`; // e.g. MAIN|A04  / CTBULK|A02
+}
+
+function allowedRowsForClass(stockClass: StockClass) {
+  if (stockClass === "CTBULK") {
+    // CTBULK kast: A-H, 4 rijen
+    const drawers = ["A","B","C","D","E","F","G","H"];
+    return drawers.flatMap((d) => [1,2,3,4].map((r) => ({ kind: "CTBULK" as const, drawer: d, row: r })));
+  }
+  // MAIN kast: A-J, 6 rijen
+  const drawers = ["A","B","C","D","E","F","G","H","I","J"];
+  return drawers.flatMap((d) => [1,2,3,4,5,6].map((r) => ({ kind: "MAIN" as const, drawer: d, row: r })));
+}
+
+/**
+ * Stockclass bepalen via ScryfallLookup -> StockPolicy, en SYP hot fallback
+ */
 async function getStockClassByCardmarketId(cardmarketId: number) {
   const lookup = await prisma.scryfallLookup.findUnique({
     where: { cardmarketId },
@@ -146,7 +161,6 @@ async function getStockClassByCardmarketId(cardmarketId: number) {
   });
 
   if (pol?.stockClass === "REGULAR" || pol?.stockClass === "CTBULK") {
-    // update sypHot flag mee (handig voor UI/exports)
     if (pol.sypHot !== sypHot) {
       await prisma.stockPolicy.update({
         where: { scryfallId: lookup.scryfallId },
@@ -158,14 +172,8 @@ async function getStockClassByCardmarketId(cardmarketId: number) {
 
   // 3) Default: SYP hot => REGULAR, anders CTBULK
   const stockClass: PrismaStockClass =
-  sypHot ? PrismaStockClass.REGULAR : PrismaStockClass.CTBULK;
+    sypHot ? PrismaStockClass.REGULAR : PrismaStockClass.CTBULK;
 
-
-
-
-
-
-  // policy upsert zodat exports/worklist simpel blijven
   await prisma.stockPolicy.upsert({
     where: { scryfallId: lookup.scryfallId },
     create: { scryfallId: lookup.scryfallId, stockClass: stockClass as any, sypHot },
@@ -176,150 +184,134 @@ async function getStockClassByCardmarketId(cardmarketId: number) {
 }
 
 /**
- * Source-aware allocator:
- * - Prefer rows that already contain the same sourceCode
- * - Else prefer completely empty rows
- * - Else fallback to least-mixed, then least-used
+ * Nieuwe allocator state:
+ * - usedByRow: sum(qtyRemaining) per rij
+ * - maxSegByRow: max(segment) per rij (voor next segment)
+ * - reservedByRow: reserveringen binnen deze upload (zodat we niet overcommitten)
  */
 type AllocState = {
-  startByGroup: Map<string, { drawer: string; row: number }>;
-  reservedByRow: Map<string, number>;
-  batchByRowAndSource: Map<string, number>;
-  maxBatchByRow: Map<string, number>;
   usedByRow: Map<string, number>;
-  sourcesByRow: Map<string, Set<string>>;
+  maxSegByRow: Map<string, number>;
+  reservedByRow: Map<string, number>;
 };
 
 async function buildAllocState(): Promise<AllocState> {
   const lots = await prisma.inventoryLot.findMany({
     where: { location: { not: null }, qtyRemaining: { gt: 0 } },
-    select: { location: true, qtyRemaining: true, sourceCode: true },
+    select: { location: true, qtyRemaining: true },
   });
 
   const usedByRow = new Map<string, number>();
-  const batchByRowAndSource = new Map<string, number>();
-  const maxBatchByRow = new Map<string, number>();
-  const sourcesByRow = new Map<string, Set<string>>();
+  const maxSegByRow = new Map<string, number>();
 
   for (const l of lots) {
     const p = parseLoc(l.location);
     if (!p) continue;
 
-    const rk = rowKey(p.drawer, p.row);
+    const rk = rowKey(p.kind, p.drawer, p.row);
     usedByRow.set(rk, (usedByRow.get(rk) ?? 0) + Number(l.qtyRemaining ?? 0));
-    maxBatchByRow.set(rk, Math.max(maxBatchByRow.get(rk) ?? 0, p.batch));
-
-    const sc = (l.sourceCode ?? "").trim();
-    if (sc) {
-      const set = sourcesByRow.get(rk) ?? new Set<string>();
-      set.add(sc);
-      sourcesByRow.set(rk, set);
-
-      const key = `${rk}|${sc}`;
-      const existing = batchByRowAndSource.get(key);
-      if (existing == null || p.batch < existing) batchByRowAndSource.set(key, p.batch);
-    }
+    maxSegByRow.set(rk, Math.max(maxSegByRow.get(rk) ?? 0, p.seg));
   }
 
-  return {
-    startByGroup: new Map(),
-    reservedByRow: new Map(),
-    batchByRowAndSource,
-    maxBatchByRow,
-    usedByRow,
-    sourcesByRow,
-  };
+  return { usedByRow, maxSegByRow, reservedByRow: new Map() };
 }
 
-function getUsedWithReserve(state: AllocState, rk: string) {
+function usedWithReserve(state: AllocState, rk: string) {
   return (state.usedByRow.get(rk) ?? 0) + (state.reservedByRow.get(rk) ?? 0);
+}
+
+function remainingCap(state: AllocState, rk: string) {
+  return Math.max(0, ROW_CAPACITY - usedWithReserve(state, rk));
 }
 
 function reserve(state: AllocState, rk: string, qty: number) {
   state.reservedByRow.set(rk, (state.reservedByRow.get(rk) ?? 0) + qty);
 }
 
-function canFit(state: AllocState, rk: string, qty: number) {
-  return getUsedWithReserve(state, rk) + qty <= ROW_CAPACITY;
+function nextSeg(state: AllocState, rk: string) {
+  const seg = (state.maxSegByRow.get(rk) ?? 0) + 1;
+  if (seg < 1 || seg > 99) return null;
+  state.maxSegByRow.set(rk, seg);
+  return seg;
 }
 
-function pickCandidate(state: AllocState, candidates: Array<{ drawer: string; row: number }>, qty: number) {
-  for (const c of candidates) {
-    const rk = rowKey(c.drawer, c.row);
-    if (!canFit(state, rk, qty)) continue;
-    return c;
-  }
-  return null;
-}
-
-async function allocateLocationForRow(
+/**
+ * Kies rij:
+ * 1) Als er een rij is waar het hele stuk (qty) past -> kies de "meest gevulde" die nog past (packing)
+ * 2) Anders -> kies rij met meeste remaining capacity (min splits)
+ */
+function pickRowForQty(
   state: AllocState,
-  opts: { stockClass: StockClass; sourceCode: string; qty: number }
-): Promise<string | null> {
-  const groups = allowedRowsForClass(opts.stockClass);
-  const groupKey = `${opts.stockClass}|${opts.sourceCode}`;
+  stockClass: StockClass,
+  qty: number
+): { kind: "MAIN" | "CTBULK"; drawer: string; row: number } | null {
+  const candidates = allowedRowsForClass(stockClass);
 
-  function batchFor(rk: string) {
-    const sourceKey = `${rk}|${opts.sourceCode}`;
-    const existingBatch = state.batchByRowAndSource.get(sourceKey);
-    const batch = existingBatch ?? Math.min(99, (state.maxBatchByRow.get(rk) ?? 0) + 1);
-    if (batch < 1 || batch > 99) return null;
+  // rows where it fits entirely
+  const fit = candidates
+    .map((c) => {
+      const rk = rowKey(c.kind, c.drawer, c.row);
+      return { c, rem: remainingCap(state, rk), used: usedWithReserve(state, rk) };
+    })
+    .filter((x) => x.rem >= qty);
 
-    state.batchByRowAndSource.set(sourceKey, batch);
-    state.maxBatchByRow.set(rk, Math.max(state.maxBatchByRow.get(rk) ?? 0, batch));
-    return batch;
+  if (fit.length) {
+    // packing: prefer higher used (more filled) to keep emptier rows for big future batches
+    fit.sort((a, b) => b.used - a.used);
+    return fit[0].c;
   }
 
-  const allCandidates: Array<{ drawer: string; row: number }> = [];
-  for (const g of groups) for (const r of g.rows) allCandidates.push({ drawer: g.drawer, row: r });
+  // else: pick row with most room (to minimize splits)
+  const any = candidates
+    .map((c) => {
+      const rk = rowKey(c.kind, c.drawer, c.row);
+      return { c, rem: remainingCap(state, rk) };
+    })
+    .filter((x) => x.rem > 0);
 
-  // 1) prefer same source already in row
-  const sourceCandidates = allCandidates.filter((c) => {
-    const rk = rowKey(c.drawer, c.row);
-    return state.sourcesByRow.get(rk)?.has(opts.sourceCode) ?? false;
-  });
+  if (!any.length) return null;
 
-  let chosen = pickCandidate(state, sourceCandidates, opts.qty);
+  any.sort((a, b) => b.rem - a.rem);
+  return any[0].c;
+}
 
-  // 2) else empty rows
-  if (!chosen) {
-    const emptyCandidates = allCandidates.filter((c) => {
-      const rk = rowKey(c.drawer, c.row);
-      const used = getUsedWithReserve(state, rk);
-      const sources = state.sourcesByRow.get(rk);
-      return used === 0 && (!sources || sources.size === 0);
-    });
-    chosen = pickCandidate(state, emptyCandidates, opts.qty);
+function formatLoc(kind: "MAIN" | "CTBULK", drawer: string, row: number, seg: number) {
+  const base = `${drawer}${pad2(row)}.${pad2(seg)}`;
+  return kind === "CTBULK" ? `CB-${base}` : base;
+}
+
+/**
+ * Allocatie die:
+ * - probeert alles in 1 rij
+ * - anders split zo min mogelijk, contiguous (segmenten in volgorde)
+ * Returns array van { location, qtyPart }
+ */
+function allocateLocationsForQty(
+  state: AllocState,
+  stockClass: StockClass,
+  totalQty: number
+): Array<{ location: string; qty: number }> {
+  let remaining = totalQty;
+  const out: Array<{ location: string; qty: number }> = [];
+
+  while (remaining > 0) {
+    const chosen = pickRowForQty(state, stockClass, remaining);
+    if (!chosen) break;
+
+    const rk = rowKey(chosen.kind, chosen.drawer, chosen.row);
+    const cap = remainingCap(state, rk);
+    if (cap <= 0) break;
+
+    const take = Math.min(remaining, cap);
+    const seg = nextSeg(state, rk);
+    if (seg == null) break;
+
+    reserve(state, rk, take);
+    out.push({ location: formatLoc(chosen.kind, chosen.drawer, chosen.row, seg), qty: take });
+    remaining -= take;
   }
 
-  // 3) else least mixed then least used
-  if (!chosen) {
-    const ranked = [...allCandidates].sort((a, b) => {
-      const rka = rowKey(a.drawer, a.row);
-      const rkb = rowKey(b.drawer, b.row);
-      const mixA = state.sourcesByRow.get(rka)?.size ?? 0;
-      const mixB = state.sourcesByRow.get(rkb)?.size ?? 0;
-      if (mixA !== mixB) return mixA - mixB;
-      return getUsedWithReserve(state, rka) - getUsedWithReserve(state, rkb);
-    });
-    chosen = pickCandidate(state, ranked, opts.qty);
-  }
-
-  if (!chosen) return null;
-
-  state.startByGroup.set(groupKey, { drawer: chosen.drawer, row: chosen.row });
-
-  const rk = rowKey(chosen.drawer, chosen.row);
-  const batch = batchFor(rk);
-  if (batch == null) return null;
-
-  reserve(state, rk, opts.qty);
-
-  const set = state.sourcesByRow.get(rk) ?? new Set<string>();
-  set.add(opts.sourceCode);
-  state.sourcesByRow.set(rk, set);
-
-  return `${chosen.drawer}${pad2(chosen.row)}.${pad2(batch)}`;
+  return out;
 }
 
 /**
@@ -470,7 +462,7 @@ export async function POST(req: NextRequest) {
 
     const consolidated = consolidateRows(parsed);
 
-    // bulk lookup for picklist
+    // bulk lookup for picklist sorting
     const uniqueIds = Array.from(new Set(consolidated.map((r) => r.cardmarketId)));
     const lookupRows = await prisma.scryfallLookup.findMany({
       where: { cardmarketId: { in: uniqueIds } },
@@ -492,7 +484,6 @@ export async function POST(req: NextRequest) {
 
     const warnings: string[] = [];
     const picklist: PickRow[] = [];
-
     const classCounts: Record<string, number> = { REGULAR: 0, CTBULK: 0 };
 
     for (const row of consolidated) {
@@ -505,52 +496,55 @@ export async function POST(req: NextRequest) {
       if (sc.warning) warnings.push(`${sc.warning}:${row.cardmarketId}`);
       classCounts[String(sc.stockClass)] = (classCounts[String(sc.stockClass)] ?? 0) + 1;
 
-      const location = await allocateLocationForRow(allocState, {
-        stockClass: sc.stockClass,
-        sourceCode,
-        qty: row.qty,
-      });
+      // ✅ Nieuwe alloc: kan meerdere locaties teruggeven (min splits)
+      const allocs = allocateLocationsForQty(allocState, sc.stockClass, row.qty);
 
-      if (!location) {
+      const allocatedTotal = allocs.reduce((a, x) => a + x.qty, 0);
+      if (allocatedTotal !== row.qty) {
         errors.push({
           line: 0,
-          message: `no location capacity available for ${sc.stockClass} (cardmarketId ${row.cardmarketId})`,
+          message: `no location capacity available for ${sc.stockClass} (cardmarketId ${row.cardmarketId}) need=${row.qty} allocated=${allocatedTotal}`,
         });
         continue;
       }
 
-      await prisma.inventoryLot.create({
-        data: {
-          cardmarketId: row.cardmarketId,
-          isFoil: row.isFoil,
+      const lu = lookupByCmid.get(row.cardmarketId);
+
+      // ✅ Maak 1 lot per alloc-chunk (zodat split netjes blijft)
+      for (const a of allocs) {
+        await prisma.inventoryLot.create({
+          data: {
+            cardmarketId: row.cardmarketId,
+            isFoil: row.isFoil,
+            condition: row.condition,
+            language,
+            qtyIn: a.qty,
+            qtyRemaining: a.qty,
+            avgUnitCostEur: row.unitCostEur,
+            sourceCode,
+            sourceDate: when,
+            location: a.location,
+          },
+        });
+        lotsCreated++;
+
+        picklist.push({
+          location: a.location,
+          set: lu?.set ?? "",
+          name: lu?.name ?? "",
+          collectorNumber: lu?.collectorNumber ?? null,
           condition: row.condition,
           language,
-          qtyIn: row.qty,
-          qtyRemaining: row.qty,
-          avgUnitCostEur: row.unitCostEur,
+          isFoil: row.isFoil,
+          qty: a.qty,
+          cardmarketId: row.cardmarketId,
           sourceCode,
-          sourceDate: when,
-          location,
-        },
-      });
-      lotsCreated++;
+          sourceDate: when.toISOString(),
+          unitCostEur: row.unitCostEur,
+        });
+      }
 
-      const lu = lookupByCmid.get(row.cardmarketId);
-      picklist.push({
-        location,
-        set: lu?.set ?? "",
-        name: lu?.name ?? "",
-        collectorNumber: lu?.collectorNumber ?? null,
-        condition: row.condition,
-        language,
-        isFoil: row.isFoil,
-        qty: row.qty,
-        cardmarketId: row.cardmarketId,
-        sourceCode,
-        sourceDate: when.toISOString(),
-        unitCostEur: row.unitCostEur,
-      });
-
+      // balance update 1x op totaal qty
       const existing = await prisma.inventoryBalance.findFirst({
         where: {
           cardmarketId: row.cardmarketId,
@@ -591,6 +585,7 @@ export async function POST(req: NextRequest) {
       balancesUpserted++;
     }
 
+    // sort picklist for picking efficiency
     picklist.sort((a, b) => {
       const lc = a.location.localeCompare(b.location);
       if (lc !== 0) return lc;

@@ -145,7 +145,8 @@ export async function POST(req: NextRequest) {
     const limit = Number(url.searchParams.get("limit") || "0");
     const take = limit && limit > 0 ? limit : 500;
 
-    const onlySource = url.searchParams.get("onlySource");     // bv. "CT" of "CM"
+    const onlySource = url.searchParams.get("onlySource") ?? url.searchParams.get("source");
+
     const onlyCtOrderId = url.searchParams.get("ctOrderId");   // bv. "123456789"
     const idsParam = url.searchParams.get("ids");              // bv. "441191,441190"
 
