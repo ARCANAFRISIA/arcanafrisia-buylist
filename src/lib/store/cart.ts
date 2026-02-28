@@ -9,6 +9,10 @@ export type CartItem = {
   collectorNumber?: string | null;
   imageSmall?: string | null;
   cardmarketId?: number | null;
+
+  // ✅ nieuw: cap info (optioneel)
+  maxBuy?: number | null;
+
   qty: number;
   payout: number; // unit payout locked at add-time
   foil: boolean; // default false
@@ -31,7 +35,9 @@ export const useCart = create<CartState>()(
       items: [],
       add: (item) =>
         set((s) => {
-          const ex = s.items.find((i) => i.id === item.id && i.foil === item.foil && i.condition === item.condition);
+          const ex = s.items.find(
+            (i) => i.id === item.id && i.foil === item.foil && i.condition === item.condition
+          );
           if (ex) {
             ex.qty += item.qty ?? 1;
             return { items: [...s.items] };
@@ -39,7 +45,12 @@ export const useCart = create<CartState>()(
           return { items: [...s.items, { ...item, qty: item.qty ?? 1 }] };
         }),
       remove: (id) => set((s) => ({ items: s.items.filter((i) => i.id !== id) })),
-      setQty: (id, qty) => set((s) => ({ items: s.items.map((i) => (i.id === id ? { ...i, qty: Math.max(0, qty) } : i)) })),
+      setQty: (id, qty) =>
+        set((s) => ({
+          items: s.items.map((i) =>
+            i.id === id ? { ...i, qty: Math.max(0, qty) } : i
+          ),
+        })),
       clear: () => set({ items: [] }),
       count: () => get().items.reduce((n, i) => n + i.qty, 0),
       total: () => get().items.reduce((n, i) => n + i.qty * i.payout, 0),
