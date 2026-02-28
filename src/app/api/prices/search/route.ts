@@ -10,6 +10,24 @@ import { Prisma } from "@prisma/client";
 
 const EXCLUDED_SET_CODES = ["lea", "leb", "ced", "cei", "sum", "4bb", "2ed", "fbb"]; // Alpha, Beta, Unlimited in lowercase
 
+const PREMODERN_FALLBACK_SET_CODES = new Set<string>([
+  "3ed",
+  "4ed","5ed","6ed","7ed","chr",
+  "ice","hml","all",
+  "mir","vis","wth",
+  "tmp","sth","exo",
+  "usg","ulg","uds",
+  "mmq","nem","pcy",
+  "inv","pls","apc",
+  "ody","tor","jud",
+  "ons","lgn","scg",
+]);
+
+function isPremodernSet(setCode: string | null | undefined) {
+  const s = (setCode ?? "").toLowerCase().trim();
+  return !!s && PREMODERN_FALLBACK_SET_CODES.has(s);
+}
+
 // Recente Standard-sets (kun je later uitbreiden/aanpassen)
 const CURRENT_STANDARD_SETS = [
   "fdn", // Foundations
@@ -488,8 +506,14 @@ if (tcgIds.length) {
 
 }
 
-function sypTargetFromMaxQty(maxQty: number | null | undefined) {
-  if (maxQty == null) return 2; // default als SYP niets weet
+function sypTargetFromMaxQty(
+  maxQty: number | null | undefined,
+  setCode: string | null | undefined
+) {
+  if (maxQty == null) {
+    return isPremodernSet(setCode) ? 4 : 2;
+  }
+
   const t = Math.floor(Number(maxQty) / 10);
   return t < 0 ? 0 : t;
 }
@@ -506,9 +530,12 @@ function sypTargetFromMaxQty(maxQty: number | null | undefined) {
     let maxBuy: number | null = null;
 
 if (cmId != null) {
-  const tcg = (r as any).tcgplayerId != null ? Number((r as any).tcgplayerId) : null;
+  const tcg =
+    (r as any).tcgplayerId != null ? Number((r as any).tcgplayerId) : null;
+
   const sypMaxQty = tcg != null ? (sypByTcg.get(tcg) ?? null) : null;
-  const target = sypTargetFromMaxQty(sypMaxQty);
+
+  const target = sypTargetFromMaxQty(sypMaxQty, r.set);
   maxBuy = Math.max(0, target - ownQtyTotal);
 }
 

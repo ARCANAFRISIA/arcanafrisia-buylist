@@ -14,6 +14,24 @@ import {
 import { getPayoutPct } from "@/lib/config";
 import { computeUnitFromTrend, type CondKey } from "@/lib/buylistEngineCore";
 
+const PREMODERN_FALLBACK_SET_CODES = new Set<string>([
+  "3ed",
+  "4ed","5ed","6ed","7ed","chr",
+  "ice","hml","all",
+  "mir","vis","wth",
+  "tmp","sth","exo",
+  "usg","ulg","uds",
+  "mmq","nem","pcy",
+  "inv","pls","apc",
+  "ody","tor","jud",
+  "ons","lgn","scg",
+]);
+
+function isPremodernSet(setCode: string | null | undefined) {
+  const s = (setCode ?? "").toLowerCase().trim();
+  return !!s && PREMODERN_FALLBACK_SET_CODES.has(s);
+}
+
 // Prisma Decimal → number
 function decToNum(v: unknown): number | null {
   if (v == null) return null;
@@ -69,12 +87,21 @@ type InBody = {
 const DEFAULT_TARGET_IF_NO_SYP = 2;
 
 // jouw regel: 100 -> 10, 20 -> 2, 28 -> 2, 0/unknown -> 2
-function computeTargetFromMaxQty(maxQty: number | null | undefined): number {
-  if (maxQty == null) return DEFAULT_TARGET_IF_NO_SYP;
+function computeTargetFromMaxQty(
+  maxQty: number | null | undefined,
+  setCode: string | null | undefined
+): number {
+  if (maxQty == null) {
+    return isPremodernSet(setCode) ? 4 : DEFAULT_TARGET_IF_NO_SYP;
+  }
+
   const mq = Number(maxQty);
-  if (!Number.isFinite(mq) || mq <= 0) return DEFAULT_TARGET_IF_NO_SYP;
+  if (!Number.isFinite(mq) || mq <= 0) {
+    return isPremodernSet(setCode) ? 4 : DEFAULT_TARGET_IF_NO_SYP;
+  }
+
   const t = Math.floor(mq / 10);
-  return t > 0 ? t : DEFAULT_TARGET_IF_NO_SYP;
+  return t > 0 ? t : (isPremodernSet(setCode) ? 4 : DEFAULT_TARGET_IF_NO_SYP);
 }
 
 export async function POST(req: NextRequest) {
@@ -325,7 +352,7 @@ export async function POST(req: NextRequest) {
 
       const tcg = tcgByCmId.get(cmId) ?? null;
       const maxQty = tcg != null ? (sypMaxByTcg.get(tcg) ?? null) : null;
-      const target = computeTargetFromMaxQty(maxQty);
+      const target = computeTargetFromMaxQty(maxQty, meta?.set ?? null);
 
       let lim = limitsByCmId.get(cmId);
       if (!lim) {

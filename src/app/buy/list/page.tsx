@@ -14,6 +14,13 @@ const GOLD = "#C9A24E";
 
 // ==== Types ==== //
 
+type CartShape = {
+  items: {
+    cardmarketId?: number | null;
+    qty: number;
+  }[];
+};
+
 type Condition = "NM" | "EX" | "GD" | "PL" | "PO";
 
 type Item = {
@@ -238,6 +245,19 @@ export default function BuyListUploadPage() {
   const [globalCond, setGlobalCond] = useState<Condition>("NM");
   const [globalFoil, setGlobalFoil] = useState(false);
   const cart = useCart();
+
+  function remainingCapForItem(it: Item, cart: CartShape): number | null {
+  const maxBuy = it.maxBuy;
+  const cmId = it.cardmarketId ?? null;
+  if (maxBuy == null || cmId == null) return null;
+
+  const inCart = cart.items
+    .filter((c) => c.cardmarketId === cmId)
+    .reduce((sum, c) => sum + c.qty, 0);
+
+  const remaining = maxBuy - inCart;
+  return remaining <= 0 ? 0 : remaining;
+}
 
   // kleine helper om 1 rij te updaten
   function updateRow(id: number, fn: (r: ResolvedLine) => ResolvedLine) {
@@ -538,22 +558,31 @@ function parseManaBoxCsv(text: string): ParsedLine[] {
 
 
 
-  function addLineToCart(row: ResolvedLine) {
-    if (!row.item || !row.payout) return;
-    const it = row.item;
+function addLineToCart(row: ResolvedLine) {
+  if (!row.item || !row.payout) return;
+  const it = row.item;
 
-    cart.add({
-      id: it.id,
-      name: it.name,
-      set: it.set,
-      imageSmall: it.imageSmall,
-      cardmarketId: it.cardmarketId ?? undefined,
-      payout: row.payout,
-      foil: row.foil,
-      condition: row.cond,
-      qty: row.qty,
-    });
-  }
+  // ✅ cap respecteren (SYP/maxBuy)
+  const remaining = remainingCapForItem(it, cart as any);
+  if (remaining !== null && remaining <= 0) return;
+
+  const want = Math.max(1, Number(row.qty) || 1);
+  const addQty = remaining === null ? want : Math.min(want, remaining);
+  if (addQty <= 0) return;
+
+  cart.add({
+    id: it.id,
+    name: it.name,
+    set: it.set,
+    imageSmall: it.imageSmall,
+    cardmarketId: it.cardmarketId ?? undefined,
+    maxBuy: it.maxBuy ?? null,
+    payout: row.payout,
+    foil: row.foil,
+    condition: row.cond,
+    qty: addQty, // ✅ capped qty
+  });
+}
 
   function addAllToCart() {
     rows
@@ -892,13 +921,17 @@ of:
                       </td>
 
                       {/* payout */}
-                      <td className="px-3 py-2 text-right tabular-nums">
-                        {row.payout
-                          ? `€ ${row.payout.toFixed(2)}`
-                          : row.item
-                          ? "—"
-                          : ""}
-                      </td>
+                     <td className="px-3 py-2 text-right tabular-nums">
+  {row.payout ? `€ ${row.payout.toFixed(2)}` : row.item ? "—" : ""}
+  {row.item?.maxBuy != null && row.item.cardmarketId != null && (
+    <div className="text-[10px] af-muted mt-0.5">
+      Resterend:{" "}
+      <span className="af-text font-semibold">
+        {remainingCapForItem(row.item, cart as any) ?? row.item.maxBuy}
+      </span>
+    </div>
+  )}
+</td>
 
                       {/* status */}
                       <td className="px-3 py-2 text-center">
@@ -923,11 +956,15 @@ of:
                       <td className="px-3 py-2 text-right">
                         <Button
                           size="sm"
-                          disabled={
-                            row.status !== "ok" ||
-                            !row.item ||
-                            !row.payout
-                          }
+                         disabled={
+  row.status !== "ok" ||
+  !row.item ||
+  !row.payout ||
+  (() => {
+    const rem = row.item ? remainingCapForItem(row.item, cart as any) : null;
+    return rem !== null && rem <= 0;
+  })()
+}
                           onClick={() => addLineToCart(row)}
                           className="btn-gold px-3 py-1 text-xs font-semibold"
                         >

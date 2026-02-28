@@ -266,6 +266,7 @@ export default function BuyPage() {
       set: it.set,
       imageSmall: it.imageSmall,
       cardmarketId: it.cardmarketId ?? undefined,
+      maxBuy: it.maxBuy ?? null,
       payout,
       foil: pref.foil,
       condition: pref.condition,
@@ -805,12 +806,10 @@ return out;
                   )}
                 </div>
 
+                {/* ✅ jouw grid control block (laat ik intact) */}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {payout ? (
-                    <div
-                      className="tabular-nums text-lg font-semibold"
-                      style={{ color: GOLD }}
-                    >
+                    <div className="tabular-nums text-lg font-semibold" style={{ color: GOLD }}>
                       € {payout.toFixed(2)}
                     </div>
                   ) : (
@@ -819,9 +818,7 @@ return out;
 
                   <select
                     value={pref.condition}
-                    onChange={(e) =>
-                      setPrefCond(it.id, e.target.value as Condition)
-                    }
+                    onChange={(e) => setPrefCond(it.id, e.target.value as Condition)}
                     className="h-8 rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-xs af-text"
                     title="Conditie"
                   >
@@ -832,31 +829,35 @@ return out;
                     <option value="PO">PO</option>
                   </select>
 
-                  <button
-                    type="button"
-                    onClick={() => togglePrefFoil(it.id)}
-                    className={[
-                      "h-8 rounded-full px-3 text-xs font-medium border",
-                      pref.foil
-                        ? "border-[#2F415B] bg-[#2A3A52] text-white"
-                        : "border-[var(--border)] bg-[var(--bg2)] af-text",
-                    ].join(" ")}
-                  >
-                    {pref.foil ? "Foil ✓" : "Foil"}
-                  </button>
+                  <label className="inline-flex items-center gap-2 h-8 px-3 rounded-full border border-[var(--border)] bg-[var(--bg2)] text-xs af-text cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={pref.foil}
+                      onChange={() => togglePrefFoil(it.id)}
+                      className="h-4 w-4 accent-[#C9A24E]"
+                    />
+                    <span>{pref.foil ? "Foil" : "Non-foil"}</span>
+                  </label>
 
-                  <Button
-                    size="sm"
-                    disabled={!payout || atCap}
-                    onClick={() => handleAdd(it)}
-                    className="btn-gold font-semibold px-3 py-1.5 ml-auto"
-                  >
-                    {atCap
-                      ? "Max bereikt"
-                      : payout
-                      ? `Add € ${payout.toFixed(2)}`
-                      : "Add"}
-                  </Button>
+                  <div className="ml-auto flex items-center gap-2 flex-nowrap">
+                    {it.maxBuy != null && it.cardmarketId != null && (
+                      <div className="text-[10px] af-muted whitespace-nowrap">
+                        Resterend:{" "}
+                        <span className="af-text font-semibold">
+                          {remaining ?? it.maxBuy}
+                        </span>
+                      </div>
+                    )}
+
+                    <Button
+                      size="sm"
+                      disabled={!payout || atCap}
+                      onClick={() => handleAdd(it)}
+                      className="btn-gold font-semibold px-3 py-1.5"
+                    >
+                      {atCap ? "Max bereikt" : payout ? `Add € ${payout.toFixed(2)}` : "Add"}
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -919,10 +920,7 @@ return out;
 
               <div className="flex flex-wrap items-center gap-2 justify-between">
                 {payout ? (
-                  <div
-                    className="tabular-nums text-base font-semibold"
-                    style={{ color: GOLD }}
-                  >
+                  <div className="tabular-nums text-base font-semibold" style={{ color: GOLD }}>
                     € {payout.toFixed(2)}
                   </div>
                 ) : (
@@ -932,9 +930,7 @@ return out;
                 <div className="flex flex-wrap items-center gap-2">
                   <select
                     value={pref.condition}
-                    onChange={(e) =>
-                      setPrefCond(it.id, e.target.value as Condition)
-                    }
+                    onChange={(e) => setPrefCond(it.id, e.target.value as Condition)}
                     className="h-7 rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-xs af-text"
                     title="Conditie"
                   >
@@ -945,45 +941,49 @@ return out;
                     <option value="PO">PO</option>
                   </select>
 
-                  <button
-                    type="button"
-                    onClick={() => togglePrefFoil(it.id)}
-                    className={[
-                      "h-7 rounded-full px-3 text-xs font-medium border",
-                      pref.foil
-                        ? "border-[#2F415B] bg-[#2A3A52] text-white"
-                        : "border-[var(--border)] bg-[var(--bg2)] af-text",
-                    ].join(" ")}
-                    title="Foil togglen"
-                  >
-                    {pref.foil ? "Foil ✓" : "Foil"}
-                  </button>
+                  {/* ✅ zelfde foil UX als grid */}
+                  <label className="inline-flex items-center gap-2 h-7 px-3 rounded-full border border-[var(--border)] bg-[var(--bg2)] text-xs af-text cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={pref.foil}
+                      onChange={() => togglePrefFoil(it.id)}
+                      className="h-4 w-4 accent-[#C9A24E]"
+                    />
+                    <span>{pref.foil ? "Foil" : "Non-foil"}</span>
+                  </label>
                 </div>
               </div>
 
-              {/* Add button – niet meer full-width */}
-              <Button
-                size="sm"
-                disabled={!payout || atCap}
-                onClick={() => handleAdd(it)}
-                className="btn-gold font-semibold px-4 py-1.5 w-auto self-start"
-              >
-                {atCap
-                  ? "Max bereikt"
-                  : payout
-                  ? `Add € ${payout.toFixed(2)}`
-                  : "Add"}
-              </Button>
+              {/* ✅ Resterend naast Add */}
+              <div className="flex items-center justify-between gap-3">
+                {it.maxBuy != null && it.cardmarketId != null && (
+                  <div className="text-[10px] af-muted whitespace-nowrap">
+                    Resterend:{" "}
+                    <span className="af-text font-semibold">
+                      {remaining ?? it.maxBuy}
+                    </span>
+                  </div>
+                )}
+
+                <Button
+                  size="sm"
+                  disabled={!payout || atCap}
+                  onClick={() => handleAdd(it)}
+                  className="btn-gold font-semibold px-4 py-1.5 w-auto"
+                >
+                  {atCap ? "Max bereikt" : payout ? `Add € ${payout.toFixed(2)}` : "Add"}
+                </Button>
+              </div>
             </div>
           </div>
         );
       })}
     </div>
 
-     {/* DESKTOP LIST + STICKY PREVIEW (zoals oude versie) */}
-<div className="mt-2 hidden md:flex md:items-start md:gap-6 md:justify-between">
-  {/* LEFT: list */}
-  <div className="w-full md:max-w-[900px] flex-1 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--bg2)]">
+    {/* DESKTOP LIST + STICKY PREVIEW (zoals oude versie) */}
+    <div className="mt-2 hidden md:flex md:items-start md:gap-6 md:justify-between">
+      {/* LEFT: list */}
+      <div className="w-full md:max-w-[900px] flex-1 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--bg2)]">
         {visible.map((it) => {
           const isActive = preview?.id === it.id;
           const pref = getPref(it.id);
@@ -1054,14 +1054,12 @@ return out;
 
                 <div className="hidden sm:block text-[10px] af-muted text-right mr-1">
                   {pref.condition}
-                  {pref.foil ? " • Foil" : ""}
+                  {pref.foil ? " • Foil" : " • Non-foil"}
                 </div>
 
                 <select
                   value={pref.condition}
-                  onChange={(e) =>
-                    setPrefCond(it.id, e.target.value as Condition)
-                  }
+                  onChange={(e) => setPrefCond(it.id, e.target.value as Condition)}
                   className="h-7 rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-xs af-text"
                   title="Conditie"
                   onClick={(e) => e.stopPropagation()}
@@ -1074,22 +1072,31 @@ return out;
                   <option value="PO">PO</option>
                 </select>
 
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    togglePrefFoil(it.id);
-                  }}
-                  className={[
-                    "h-7 rounded-full px-3 text-xs font-medium border",
-                    pref.foil
-                      ? "border-[#2F415B] bg-[#2A3A52] text-white"
-                      : "border-[var(--border)] bg-[var(--bg2)] af-text",
-                  ].join(" ")}
+                {/* ✅ checkbox foil (duidelijker + consistent) */}
+                <label
+                  className="inline-flex items-center gap-2 h-7 px-3 rounded-full border border-[var(--border)] bg-[var(--bg2)] text-xs af-text cursor-pointer select-none"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
                   title="Foil togglen"
                 >
-                  {pref.foil ? "Foil ✓" : "Foil"}
-                </button>
+                  <input
+                    type="checkbox"
+                    checked={pref.foil}
+                    onChange={() => togglePrefFoil(it.id)}
+                    className="h-4 w-4 accent-[#C9A24E]"
+                  />
+                  <span>{pref.foil ? "Foil" : "Non-foil"}</span>
+                </label>
+
+                {/* ✅ Resterend direct links van Add */}
+                {it.maxBuy != null && it.cardmarketId != null && (
+                  <div className="text-[10px] af-muted whitespace-nowrap mr-1">
+                    Resterend:{" "}
+                    <span className="af-text font-semibold">
+                      {remaining ?? it.maxBuy}
+                    </span>
+                  </div>
+                )}
 
                 <Button
                   size="sm"
@@ -1100,11 +1107,7 @@ return out;
                   }}
                   className="btn-gold font-semibold px-3 py-1.5"
                 >
-                  {atCap
-                    ? "Max bereikt"
-                    : payout
-                    ? `Add € ${payout.toFixed(2)}`
-                    : "Add"}
+                  {atCap ? "Max bereikt" : payout ? `Add € ${payout.toFixed(2)}` : "Add"}
                 </Button>
               </div>
             </div>
@@ -1113,7 +1116,7 @@ return out;
       </div>
 
       {/* RIGHT: sticky preview */}
-        <aside className="w-[380px] shrink-0 md:sticky md:top-24 rounded-xl border border-[var(--border)] bg-[var(--bg2)] p-4 h-[560px]">
+      <aside className="w-[380px] shrink-0 md:sticky md:top-24 rounded-xl border border-[var(--border)] bg-[var(--bg2)] p-4 h-[560px]">
         {!preview || !previewPref ? (
           <div className="h-full grid place-items-center af-muted text-sm">
             Hover een kaart in de lijst voor een grote preview
@@ -1131,17 +1134,12 @@ return out;
             <div
               className="mx-auto rounded border border-[var(--border)] bg-black/30 w-[280px] h-[420px] bg-no-repeat bg-center bg-contain shadow-[0_10px_30px_rgba(0,0,0,.35)]"
               style={{
-                backgroundImage: `url("${
-                  (preview.imageNormal || preview.imageSmall) ?? ""
-                }")`,
+                backgroundImage: `url("${(preview.imageNormal || preview.imageSmall) ?? ""}")`,
               }}
             />
 
             {previewPayout ? (
-              <div
-                className="mt-3 text-center text-xl font-bold"
-                style={{ color: GOLD }}
-              >
+              <div className="mt-3 text-center text-xl font-bold" style={{ color: GOLD }}>
                 € {previewPayout.toFixed(2)}
               </div>
             ) : (
@@ -1153,9 +1151,7 @@ return out;
             <div className="mt-4 flex items-center justify-center gap-3">
               <select
                 value={previewPref.condition}
-                onChange={(e) =>
-                  setPrefCond(preview.id, e.target.value as Condition)
-                }
+                onChange={(e) => setPrefCond(preview.id, e.target.value as Condition)}
                 className="h-9 rounded border border-[var(--border)] bg-[var(--bg2)] px-2 text-sm af-text"
                 title="Conditie"
               >
@@ -1166,22 +1162,29 @@ return out;
                 <option value="PO">PO</option>
               </select>
 
-              <button
-                type="button"
-                onClick={() => togglePrefFoil(preview.id)}
-                className={[
-                  "h-9 rounded-full px-3 text-sm font-medium border",
-                  previewPref.foil
-                    ? "border-[#2F415B] bg-[#2A3A52] text-white"
-                    : "border-[var(--border)] bg-[var(--bg2)] af-text",
-                ].join(" ")}
-                title="Foil togglen"
-              >
-                {previewPref.foil ? "Foil ✓" : "Foil"}
-              </button>
+              {/* ✅ checkbox foil (consistent met grid) */}
+              <label className="inline-flex items-center gap-2 h-9 px-3 rounded-full border border-[var(--border)] bg-[var(--bg2)] text-sm af-text cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={previewPref.foil}
+                  onChange={() => togglePrefFoil(preview.id)}
+                  className="h-4 w-4 accent-[#C9A24E]"
+                />
+                <span>{previewPref.foil ? "Foil" : "Non-foil"}</span>
+              </label>
             </div>
 
-            <div className="mt-4 grid place-items-center">
+            {/* ✅ Resterend naast Add */}
+            <div className="mt-4 flex items-center justify-center gap-3">
+              {preview.maxBuy != null && preview.cardmarketId != null && (
+                <div className="text-[11px] af-muted whitespace-nowrap">
+                  Resterend:{" "}
+                  <span className="af-text font-semibold">
+                    {previewRemaining ?? preview.maxBuy}
+                  </span>
+                </div>
+              )}
+
               <Button
                 className="btn-gold font-semibold min-w-[180px]"
                 disabled={!previewPayout || previewAtCap}
@@ -1198,7 +1201,7 @@ return out;
         )}
       </aside>
     </div>
-</>
+  </>
 )}
 
 </section>
@@ -1218,12 +1221,11 @@ function BackToTopButton() {
 
   useEffect(() => {
     const onScroll = () => {
-      // wanneer de knop verschijnt (px vanaf boven)
       setVisible(window.scrollY > 250);
     };
 
     window.addEventListener("scroll", onScroll);
-    onScroll(); // meteen één keer runnen
+    onScroll();
 
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
@@ -1236,13 +1238,13 @@ function BackToTopButton() {
       onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
       style={{
         position: "fixed",
-        bottom: "24px",      // iets lager kan ook: "32px"
-        right: "28px",       // aan rechterkant van de content
+        bottom: "24px",
+        right: "28px",
         backgroundColor: "#050910",
         color: "#F9FAFB",
         padding: "8px 14px",
         borderRadius: "9999px",
-        zIndex: 999999,      // boven alles
+        zIndex: 999999,
         border: "1px solid #C9A24E",
         boxShadow: "0 10px 25px rgba(0,0,0,0.65)",
         fontSize: "11px",

@@ -18,6 +18,19 @@ import {
 const GOLD = "#C9A24E";
 const fmt = (n: number) => `€ ${n.toFixed(2)}`;
 
+function remainingForCartLine(cart: any, line: any): number | null {
+  const maxBuy = line.maxBuy;
+  const cmId = line.cardmarketId ?? null;
+  if (maxBuy == null || cmId == null) return null;
+
+  const inCart = cart.items
+    .filter((x: any) => (x.cardmarketId ?? null) === cmId)
+    .reduce((s: number, x: any) => s + (Number(x.qty) || 0), 0);
+
+  const remaining = Number(maxBuy) - inCart;
+  return remaining <= 0 ? 0 : remaining;
+}
+
 export default function CartModal() {
   const cart = useCart();
   const [open, setOpen] = useState(false);
@@ -114,13 +127,21 @@ export default function CartModal() {
                   </Button>
                   <div className="w-6 text-center tabular-nums">{i.qty}</div>
                   <Button
-                    variant="secondary"
-                    size="icon"
-                    aria-label="Verhoog aantal"
-                    onClick={() => cart.setQty(i.id, i.qty + 1)}
-                  >
-                    +
-                  </Button>
+  variant="secondary"
+  size="icon"
+  aria-label="Verhoog aantal"
+  disabled={(() => {
+    const rem = remainingForCartLine(cart, i);
+    return rem !== null && rem <= 0;
+  })()}
+  onClick={() => {
+    const rem = remainingForCartLine(cart, i);
+    if (rem !== null && rem <= 0) return;
+    cart.setQty(i.id, i.qty + 1);
+  }}
+>
+  +
+</Button>
                   <Button
                     variant="secondary"
                     size="icon"
