@@ -369,11 +369,12 @@ export async function POST(req: Request) {
         isFoil: r.line.isFoil,
         cond: defaultCond,
         ctx: {
-          edhrecRank: sig.edhrecRank ?? null,
-          mtgoTix: sig.tix ?? null,
-          gameChanger: sig.gameChanger ?? false,
-          ownQty,
-        },
+  edhrecRank: sig.edhrecRank ?? null,
+  mtgoTix: sig.tix ?? null,
+  gameChanger: sig.gameChanger ?? false,
+  ownQty,
+  setCode: sig.set ?? null, // ✅
+},
       });
 
       const usedTrend = engine.usedTrend ?? 0;

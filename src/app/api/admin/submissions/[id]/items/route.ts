@@ -232,11 +232,12 @@ export async function PATCH(
         isFoil,
         cond: condition,
         ctx: {
-          ownQty,
-          edhrecRank: meta?.edhrecRank ?? null,
-          mtgoTix: meta?.tix ?? null,
-          gameChanger: meta?.gameChanger ?? null,
-        },
+  ownQty,
+  edhrecRank: meta?.edhrecRank ?? null,
+  mtgoTix: meta?.tix ?? null,
+  gameChanger: meta?.gameChanger ?? null,
+  setCode: meta?.set ?? null, // ✅
+},
       });
 
       let unitCents = 0;

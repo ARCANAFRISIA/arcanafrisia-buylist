@@ -86,12 +86,13 @@ function computeClientPayout(
     trendFoil: it.trendFoil,
     isFoil: pref.foil,
     cond: condKey,
-    ctx: {
-      ownQty: it.ownQty ?? 0,
-      edhrecRank: it.edhrecRank ?? null,
-      mtgoTix: it.tix ?? null,
-      gameChanger: it.gameChanger ?? null,
-    },
+   ctx: {
+  ownQty: it.ownQty ?? 0,
+  edhrecRank: it.edhrecRank ?? null,
+  mtgoTix: it.tix ?? null,
+  gameChanger: it.gameChanger ?? null,
+  setCode: it.set ?? null, // ✅ nodig voor Premodern/Revised boosts
+},
   });
 
   if (!allowed || unit <= 0) return null;
@@ -117,11 +118,12 @@ function itemIsBuyable(it: Item): boolean {
         isFoil: foil,
         cond: conditionToCondKey(cond),
         ctx: {
-          ownQty: it.ownQty ?? 0,
-          edhrecRank: it.edhrecRank ?? null,
-          mtgoTix: it.tix ?? null,
-          gameChanger: it.gameChanger ?? null,
-        },
+  ownQty: it.ownQty ?? 0,
+  edhrecRank: it.edhrecRank ?? null,
+  mtgoTix: it.tix ?? null,
+  gameChanger: it.gameChanger ?? null,
+  setCode: it.set ?? null, // ✅
+},
       });
 
       if (allowed && unit > 0) {

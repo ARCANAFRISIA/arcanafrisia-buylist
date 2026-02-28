@@ -8,7 +8,7 @@ import prisma from "@/lib/prisma";
 import { getPendingQtyByCardmarketId } from "@/lib/buylistPending";
 import { Prisma } from "@prisma/client";
 
-const EXCLUDED_SET_CODES = ["lea", "leb", "ced", "cei", "sum", "4bb"]; // Alpha, Beta, Unlimited in lowercase
+const EXCLUDED_SET_CODES = ["lea", "leb", "ced", "cei", "sum", "4bb", "2ed", "fbb"]; // Alpha, Beta, Unlimited in lowercase
 
 // Recente Standard-sets (kun je later uitbreiden/aanpassen)
 const CURRENT_STANDARD_SETS = [

@@ -301,6 +301,7 @@ export async function POST(req: NextRequest) {
           edhrecRank: meta?.edhrecRank ?? null,
           mtgoTix: meta?.tix ?? null,
           gameChanger: meta?.gameChanger ?? null,
+          setCode: meta?.set ?? null,
         },
       });
 

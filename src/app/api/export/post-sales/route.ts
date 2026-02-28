@@ -176,59 +176,57 @@ export async function GET(req: NextRequest) {
     stockClassByCmid.set(cmid, sc);
   }
 
- // ---- soldMap in bulk (only when needed) ----
-const soldMap = new Map<string, number>();
-if (mode === "relist") {
-  type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: any };
-  const rows = await prisma.$queryRawUnsafe<Row[]>(
-    `
-    SELECT
-      "cardmarketId",
-      COALESCE("isFoil", false) AS "isFoil",
-      ${normCondSql(`"condition"`)} AS "condition",
-      ${normLangSql(`"language"`)} AS "language",
-      COALESCE(SUM(qty),0) AS sum
-    FROM "SalesLog"
-    WHERE "inventoryAppliedAt" IS NOT NULL
-      AND ts >= $1
-    GROUP BY 1,2,3,4
-    `,
-    effectiveSince as any
-  );
+  // ---- soldMap in bulk (only when needed) ----
+  const soldMap = new Map<string, number>();
+  if (mode === "relist") {
+    type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: any };
+    const rows = await prisma.$queryRawUnsafe<Row[]>(
+      `
+      SELECT
+        "cardmarketId",
+        COALESCE("isFoil", false) AS "isFoil",
+        ${normCondSql(`"condition"`)} AS "condition",
+        ${normLangSql(`"language"`)} AS "language",
+        COALESCE(SUM(qty),0) AS sum
+      FROM "SalesLog"
+      WHERE "inventoryAppliedAt" IS NOT NULL
+        AND ts >= $1
+      GROUP BY 1,2,3,4
+      `,
+      effectiveSince as any
+    );
 
-  for (const r of rows) {
-    const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}|${r.language}`;
-    soldMap.set(key, Math.abs(Number(r.sum || 0)));
+    for (const r of rows) {
+      const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}|${r.language}`;
+      soldMap.set(key, Math.abs(Number(r.sum || 0)));
+    }
   }
-}
 
+  // ---- newStockMap in bulk (only when needed) ----
+  const newStockMap = new Map<string, number>();
+  if (mode === "newstock") {
+    type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: any };
+    const rows = await prisma.$queryRawUnsafe<Row[]>(
+      `
+      SELECT
+        "cardmarketId",
+        COALESCE("isFoil", false) AS "isFoil",
+        ${normCondSql(`"condition"`)} AS "condition",
+        ${normLangSql(`"language"`)} AS "language",
+        COALESCE(SUM("qtyRemaining"),0) AS sum
+      FROM "InventoryLot"
+      WHERE "sourceDate" >= $1
+        AND "qtyRemaining" > 0
+      GROUP BY 1,2,3,4
+      `,
+      effectiveSince as any
+    );
 
- // ---- newStockMap in bulk (only when needed) ----
-const newStockMap = new Map<string, number>();
-if (mode === "newstock") {
-  type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: any };
-  const rows = await prisma.$queryRawUnsafe<Row[]>(
-    `
-    SELECT
-      "cardmarketId",
-      COALESCE("isFoil", false) AS "isFoil",
-      ${normCondSql(`"condition"`)} AS "condition",
-      ${normLangSql(`"language"`)} AS "language",
-      COALESCE(SUM("qtyRemaining"),0) AS sum
-    FROM "InventoryLot"
-    WHERE "sourceDate" >= $1
-      AND "qtyRemaining" > 0
-    GROUP BY 1,2,3,4
-    `,
-    effectiveSince as any
-  );
-
-  for (const r of rows) {
-    const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}|${r.language}`;
-    newStockMap.set(key, Math.abs(Number(r.sum || 0)));
+    for (const r of rows) {
+      const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}|${r.language}`;
+      newStockMap.set(key, Math.abs(Number(r.sum || 0)));
+    }
   }
-}
-
 
   // ---- cmTrendMap in bulk ----
   const cmTrendMap = new Map<number, number>();
@@ -259,17 +257,43 @@ if (mode === "newstock") {
   }
 
   const ctMinMap = new Map<number, number>();
+
   if (bpIds.size) {
-    const bpArr = Array.from(bpIds) as number[];
-    const rows = await prisma.cTMarketSummary.findMany({
-      where: { blueprintId: { in: bpArr } },
-      select: { blueprintId: true, minPrice: true },
-    });
-    const ctByBp = new Map<number, number>();
-    for (const r of rows) if (r.minPrice != null) ctByBp.set(Number(r.blueprintId), Number(r.minPrice));
-    for (const [cmid, bp] of bpByCmid.entries()) {
-      const v = ctByBp.get(bp);
-      if (v != null) ctMinMap.set(cmid, v);
+    const raw = Array.from(bpIds);
+
+    // safety: normaliseer naar safe ints (geen NaN/BigInt/strings)
+    const bpArr = raw
+      .map((v) => Number(v))
+      .filter((n) => Number.isInteger(n) && Number.isSafeInteger(n)) as number[];
+
+    if (bpArr.length) {
+      const CHUNK = 5000; // kan hoger/lager; 5k is meestal prima
+      const ctByBp = new Map<number, number>();
+
+      for (let i = 0; i < bpArr.length; i += CHUNK) {
+        const chunk = bpArr.slice(i, i + CHUNK);
+
+        // Pak 1 regel per blueprintId: MIN(minPrice) over buckets/isFoil in latest snapshot
+        const rows = await prisma.$queryRawUnsafe<{ blueprintId: number; minprice: number | null }[]>(
+          `
+          SELECT "blueprintId", MIN("minPrice") AS minprice
+          FROM "CTMarketLatest"
+          WHERE "blueprintId" = ANY($1)
+            AND "minPrice" IS NOT NULL
+          GROUP BY "blueprintId"
+          `,
+          chunk
+        );
+
+        for (const r of rows) {
+          if (r.minprice != null) ctByBp.set(Number(r.blueprintId), Number(r.minprice));
+        }
+      }
+
+      for (const [cmid, bp] of bpByCmid.entries()) {
+        const v = ctByBp.get(bp);
+        if (v != null) ctMinMap.set(cmid, v);
+      }
     }
   }
 
@@ -370,12 +394,17 @@ if (mode === "newstock") {
     );
 
     for (const r of rows) {
-      const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}|${r.language}`;
-      let price: number | null = null;
-      if (r.unitPriceEur != null) price = Number(r.unitPriceEur);
-      else if (r.lineTotalEur != null && r.qty) price = Number(r.lineTotalEur) / Math.abs(Number(r.qty));
-      if (price != null && price > 0) lastSoldPriceMap.set(key, price);
-    }
+  const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}|${r.language}`;
+  let price: number | null = null;
+
+  if (r.unitPriceEur != null) {
+    price = Number(r.unitPriceEur);
+  } else if (r.lineTotalEur != null && r.qty) {
+    price = Number(r.lineTotalEur) / Math.abs(Number(r.qty));
+  }
+
+  if (price != null && price > 0) lastSoldPriceMap.set(key, price);
+}
   }
 
   // ---- policy (only needed for CM) ----
@@ -391,10 +420,128 @@ if (mode === "newstock") {
     return new Response("No enabled ListPolicy for CM channel", { status: 400 });
   }
 
+  // ---- CTBULK rows per locatie/source vanuit InventoryLot (geen active source) ----
+  type LotAggRow = {
+    cardmarketId: number;
+    isFoil: boolean;
+    condition: string; // normalized
+    language: string; // normalized
+    sourceCode: string;
+    location: string;
+    qty: any; // SUM
+  };
+
+  let ctbulkRows: LotAggRow[] = [];
+
+  if (channel === "CTBULK") {
+    const ctbulkCmIds = cmIds.filter((id) => (stockClassByCmid.get(id) ?? "REGULAR") === "CTBULK");
+
+    if (ctbulkCmIds.length) {
+      const whereSince = mode === "newstock" ? `AND "sourceDate" >= $2` : ``;
+      const params: any[] = mode === "newstock" ? [ctbulkCmIds, effectiveSince] : [ctbulkCmIds];
+
+      ctbulkRows = await prisma.$queryRawUnsafe<LotAggRow[]>(
+        `
+        SELECT
+          "cardmarketId",
+          COALESCE("isFoil", false) AS "isFoil",
+          ${normCondSql(`"condition"`)} AS "condition",
+          ${normLangSql(`"language"`)} AS "language",
+          "sourceCode",
+          "location",
+          COALESCE(SUM("qtyRemaining"),0) AS qty
+        FROM "InventoryLot"
+        WHERE "cardmarketId" = ANY($1)
+          AND "qtyRemaining" > 0
+          AND "location" IS NOT NULL
+          AND "sourceCode" IS NOT NULL
+          ${whereSince}
+        GROUP BY 1,2,3,4,5,6
+        HAVING COALESCE(SUM("qtyRemaining"),0) > 0
+        ORDER BY "cardmarketId","isFoil","condition","language","location","sourceCode"
+        `,
+        ...params
+      );
+    }
+  }
+
   const header =
     "cardmarketId,isFoil,condition,language,addQty,priceEur,policyName,sourceCode,stockClass,location,comment\n";
   const lines: string[] = [header];
 
+  // ✅ CTBULK EARLY RETURN: export per locatie/source (meerdere regels per kaart mogelijk)
+  if (channel === "CTBULK") {
+    for (const r of ctbulkRows) {
+      const addQty = Number(r.qty || 0);
+      if (!(addQty > 0)) continue;
+
+      const cmid = Number(r.cardmarketId);
+      const cond = (r.condition || "NM").toUpperCase();
+      const lang = (r.language || "EN").toUpperCase();
+
+      // pricing (zelfde branch als jouw newstock/full)
+      let price: number | null = null;
+
+      const cmTrend = cmTrendMap.get(cmid) ?? null;
+
+      const bucket = conditionToCtBucket(cond);
+      const ctKey = `${cmid}|${r.isFoil ? 1 : 0}|${bucket}`;
+      const ctMinByBucket = ctMinByCond.get(ctKey) ?? null;
+
+      const ctMinGlobal = ctMinMap.get(cmid) ?? null;
+      const ctMin = ctMinByBucket ?? ctMinGlobal;
+
+      if (cmTrend != null || ctMin != null) {
+        const base = Math.max(ctMin ?? 0, (cmTrend ?? 0) * 1.10);
+        price = base;
+      } else {
+        price = 1000;
+      }
+
+      const step = 0.05; // CTBULK rounding
+      if (price != null && price > 0) price = roundStep(price, step);
+      if (price == null || !(price > 0)) continue;
+
+      const sourceCode = (r.sourceCode ?? "").trim();
+      const location = (r.location ?? "").trim();
+      if (!sourceCode || !location) continue;
+
+      const comment = buildComment("CTBULK", location, sourceCode);
+
+      lines.push(
+        [
+          csvEscape(cmid),
+          csvEscape(!!r.isFoil),
+          csvEscape(cond),
+          csvEscape(lang),
+          csvEscape(addQty),
+          csvEscape(price.toFixed(2)),
+          csvEscape("CTBULK"),
+          csvEscape(sourceCode),
+          csvEscape("CTBULK"),
+          csvEscape(location),
+          csvEscape(comment),
+        ].join(",") + "\n"
+      );
+    }
+
+    if (!noCursor) {
+      await prisma.syncCursor.upsert({
+        where: { key: cursorKey },
+        update: { value: new Date().toISOString(), updatedAt: new Date() },
+        create: { key: cursorKey, value: new Date().toISOString(), updatedAt: new Date() },
+      });
+    }
+
+    return new Response(lines.join(""), {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="post-sales-${channel}-${Date.now()}.csv"`,
+      },
+    });
+  }
+
+  // ---- CM flow blijft exact zoals origineel ----
   for (const b of balances) {
     if (b.qtyOnHand <= 0) continue;
 
@@ -431,40 +578,37 @@ if (mode === "newstock") {
       if (!policy) continue;
 
       if (mode === "full") {
-  // ✅ CM snapshot: desired listing qty op basis van huidige onHand + tier cap
-  const tierNow = policy.tiers.find((t) => b.qtyOnHand >= t.minOnHand) || null;
-  const capNow = tierNow?.listQty ?? 0;
+        // ✅ CM snapshot: desired listing qty op basis van huidige onHand + tier cap
+        const tierNow = policy.tiers.find((t) => b.qtyOnHand >= t.minOnHand) || null;
+        const capNow = tierNow?.listQty ?? 0;
 
-  // "desired online" = min(capNow, qtyOnHand)
-  addQty = Math.max(0, Math.min(capNow, b.qtyOnHand));
-  if (addQty <= 0) continue;
-} else if (mode === "relist") {
-  if (soldSince <= 0) continue;
+        // "desired online" = min(capNow, qtyOnHand)
+        addQty = Math.max(0, Math.min(capNow, b.qtyOnHand));
+        if (addQty <= 0) continue;
+      } else if (mode === "relist") {
+        if (soldSince <= 0) continue;
 
-  const tierNow = policy.tiers.find((t) => b.qtyOnHand >= t.minOnHand) || null;
-  const capNow = tierNow?.listQty ?? 0;
+        const tierNow = policy.tiers.find((t) => b.qtyOnHand >= t.minOnHand) || null;
+        const capNow = tierNow?.listQty ?? 0;
 
-  addQty = Math.max(0, Math.min(soldSince, capNow, b.qtyOnHand));
-} else {
-  // newstock
-  if (newSince <= 0) continue;
+        addQty = Math.max(0, Math.min(soldSince, capNow, b.qtyOnHand));
+      } else {
+        // newstock
+        if (newSince <= 0) continue;
 
-  const tierNow = policy.tiers.find((t) => b.qtyOnHand >= t.minOnHand) || null;
-  const capNow = tierNow?.listQty ?? 0;
+        const tierNow = policy.tiers.find((t) => b.qtyOnHand >= t.minOnHand) || null;
+        const capNow = tierNow?.listQty ?? 0;
 
-  const oldOnHand = Math.max(0, b.qtyOnHand - newSince);
-  const tierOld = policy.tiers.find((t) => oldOnHand >= t.minOnHand) || null;
-  const capOld = tierOld?.listQty ?? 0;
+        const oldOnHand = Math.max(0, b.qtyOnHand - newSince);
+        const tierOld = policy.tiers.find((t) => oldOnHand >= t.minOnHand) || null;
+        const capOld = tierOld?.listQty ?? 0;
 
-  const desiredNow = Math.min(capNow, b.qtyOnHand);
-  const desiredOld = Math.min(capOld, oldOnHand);
+        const desiredNow = Math.min(capNow, b.qtyOnHand);
+        const desiredOld = Math.min(capOld, oldOnHand);
 
-  const extraNeeded = Math.max(0, desiredNow - desiredOld);
-  addQty = Math.max(0, Math.min(extraNeeded, newSince, b.qtyOnHand));
-}
-
-
-     
+        const extraNeeded = Math.max(0, desiredNow - desiredOld);
+        addQty = Math.max(0, Math.min(extraNeeded, newSince, b.qtyOnHand));
+      }
     }
 
     if (addQty <= 0) continue;
@@ -557,3 +701,4 @@ if (mode === "newstock") {
     },
   });
 }
+

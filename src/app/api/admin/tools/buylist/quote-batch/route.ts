@@ -102,11 +102,12 @@ export async function POST(req: Request) {
         isFoil: foil,
         cond,
         ctx: {
-          edhrecRank: sig.edhrecRank ?? null,
-          mtgoTix: sig.tix ?? null,
-          gameChanger: sig.gameChanger ?? false,
-          ownQty,
-        },
+  edhrecRank: sig.edhrecRank ?? null,
+  mtgoTix: sig.tix ?? null,
+  gameChanger: sig.gameChanger ?? false,
+  ownQty,
+  setCode: sig.set ?? null, // ✅
+},
       });
 
       return {

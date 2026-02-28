@@ -77,11 +77,12 @@ function computeClientPayout(it: Item, cond: Condition, foil: boolean): number |
     isFoil: foil,
     cond: conditionToCondKey(cond),
     ctx: {
-      ownQty: it.ownQty ?? 0,
-      edhrecRank: it.edhrecRank ?? null,
-      mtgoTix: it.tix ?? null,
-      gameChanger: it.gameChanger ?? null,
-    },
+  ownQty: it.ownQty ?? 0,
+  edhrecRank: it.edhrecRank ?? null,
+  mtgoTix: it.tix ?? null,
+  gameChanger: it.gameChanger ?? null,
+  setCode: it.set ?? null, // ✅
+},
   });
 
   if (!allowed || unit <= 0) return null;
