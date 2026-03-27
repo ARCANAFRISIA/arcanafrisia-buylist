@@ -38,12 +38,20 @@ export default function PostSalesPage() {
     return `/api/export/post-sales?${params.toString()}`;
   };
 
+  // CM full physical export (lot-based, PM core only)
+  const downloadCmFullPhysical = () => {
+    const params = new URLSearchParams();
+    params.set("channel", "CM");
+    params.set("mode", "full");
+    params.set("markupPct", markupPct || "0.05");
+    params.set("physical", "1");
+    window.location.href = `/api/export/post-sales?${params.toString()}`;
+  };
+
   const parseCsv = (csv: string): Row[] => {
     const lines = csv.trim().split("\n");
     if (lines.length <= 1) return [];
 
-    // header:
-    // cardmarketId,isFoil,condition,language,addQty,priceEur,policyName,sourceCode,stockClass,location,comment
     return lines.slice(1).map((line) => {
       const parts = line.split(",");
       return {
@@ -84,8 +92,10 @@ export default function PostSalesPage() {
   };
 
   const helperText = useMemo(() => {
-    if (!isCTBULK) return "CM export gebruikt ListPolicy tiers. CTBULK exporteert alleen stockClass=CTBULK.";
-    return "CT (CTBULK): full = alles CTBULK. newstock = alleen sinds cursor/since. relist = sold since cursor/since.";
+    if (!isCTBULK) {
+      return "CM exporteert alleen Premodern core voorraad uit locaties PM-*-EX en PM-*-GD. PM-PLAYED gaat nooit mee.";
+    }
+    return "CTBULK exporteert alleen voorraad uit CB-locaties. PM-EX/GD en PM-PLAYED worden uitgesloten.";
   }, [isCTBULK]);
 
   return (
@@ -138,9 +148,7 @@ export default function PostSalesPage() {
             onChange={(e) => setSince(e.target.value)}
             placeholder="2026-01-08T00:00:00Z"
           />
-          <div className="text-xs opacity-70 mt-1">
-            Leeg = cursor (per channel+mode). Full negeert since.
-          </div>
+          <div className="text-xs opacity-70 mt-1">Leeg = cursor (per channel+mode). Full negeert since.</div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -157,7 +165,7 @@ export default function PostSalesPage() {
         </div>
       </div>
 
-      <div className="flex gap-3">
+      <div className="flex gap-3 flex-wrap">
         <button
           onClick={handlePreview}
           disabled={loading}
@@ -165,11 +173,15 @@ export default function PostSalesPage() {
         >
           {loading ? "Preview…" : "Preview"}
         </button>
+        <button onClick={handleDownload} className="rounded-xl px-4 py-2 border hover:opacity-90">
+          Download CSV
+        </button>
+
         <button
-          onClick={handleDownload}
+          onClick={downloadCmFullPhysical}
           className="rounded-xl px-4 py-2 border hover:opacity-90"
         >
-          Download CSV
+          CM FULL PM physical CSV
         </button>
       </div>
 

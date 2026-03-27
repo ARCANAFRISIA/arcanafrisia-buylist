@@ -15,8 +15,9 @@ type PickRow = {
   qty: number;
   cardmarketId: number;
   sourceCode: string;
-  sourceDate: string; // ISO
+  sourceDate: string;
   unitCostEur: number;
+  routeTarget: "PM_CORE" | "PM_PLAYED" | "CTBULK";
 };
 
 type UploadResult = {
@@ -25,8 +26,13 @@ type UploadResult = {
   rowsConsolidated?: number;
   lotsCreated?: number;
   balancesUpserted?: number;
+  routeCounts?: {
+    PM_CORE?: number;
+    PM_PLAYED?: number;
+    CTBULK?: number;
+  };
   rowErrors?: { line: number; message: string }[];
-  warnings?: any[]; // laat even any zodat je huidige warnings vorm niet breekt
+  warnings?: any[];
   picklist?: PickRow[];
   error?: string;
 };
@@ -91,6 +97,7 @@ export default function StockInPage() {
 
     const header = [
       "location",
+      "routeTarget",
       "set",
       "name",
       "collectorNumber",
@@ -117,6 +124,7 @@ export default function StockInPage() {
         .map((r) =>
           [
             r.location,
+            r.routeTarget,
             r.set,
             r.name,
             r.collectorNumber ?? "",
@@ -202,7 +210,6 @@ export default function StockInPage() {
 
       {result && (
         <div className="space-y-4">
-          {/* Summary */}
           <div
             className={`rounded-md border p-3 text-sm ${
               result.ok
@@ -218,10 +225,17 @@ export default function StockInPage() {
                 ? ` · rowsConsolidated: ${result.rowsConsolidated}`
                 : ""}
             </div>
+
+            {result.routeCounts && (
+              <div className="opacity-90 mt-1">
+                PM_CORE: {result.routeCounts.PM_CORE ?? 0} · PM_PLAYED:{" "}
+                {result.routeCounts.PM_PLAYED ?? 0} · CTBULK: {result.routeCounts.CTBULK ?? 0}
+              </div>
+            )}
+
             {picklist.length > 0 && <div className="opacity-90 mt-1">picklist rows: {picklist.length}</div>}
           </div>
 
-          {/* Picklist table */}
           {picklist.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -238,6 +252,7 @@ export default function StockInPage() {
                   <thead className="bg-black/30">
                     <tr>
                       <th className="text-left p-2">location</th>
+                      <th className="text-left p-2">route</th>
                       <th className="text-left p-2">set</th>
                       <th className="text-left p-2">name</th>
                       <th className="text-left p-2">#</th>
@@ -254,6 +269,7 @@ export default function StockInPage() {
                     {picklist.map((r, i) => (
                       <tr key={i} className="odd:bg-black/10">
                         <td className="p-2 font-mono">{r.location}</td>
+                        <td className="p-2 font-mono">{r.routeTarget}</td>
                         <td className="p-2 font-mono">{r.set || "—"}</td>
                         <td className="p-2">{r.name || "—"}</td>
                         <td className="p-2 font-mono">{r.collectorNumber ?? "—"}</td>
@@ -271,12 +287,13 @@ export default function StockInPage() {
               </div>
 
               <div className="text-xs opacity-70">
-                Tip: dit is exact je “neerleg-lijst” voor deze upload. Download als CSV en sorteer/filter in Excel indien nodig.
+                Tip: dit is exact je neerleg-lijst voor deze upload. PM-SET-EX / PM-SET-GD leg je
+                in de juiste setdoos-sectie, PM-PLAYED in je played-doos, en CB-locaties blijven je
+                CT-flow.
               </div>
             </div>
           )}
 
-          {/* Warnings */}
           {hasWarnings && (
             <div className="rounded-md border border-yellow-700/50 bg-yellow-950/20 p-3">
               <div className="text-yellow-200 font-medium text-sm mb-2">
@@ -303,7 +320,6 @@ export default function StockInPage() {
             </div>
           )}
 
-          {/* Row errors */}
           {hasRowErrors && (
             <div className="rounded-md border border-red-700/50 bg-red-950/20 p-3">
               <div className="text-red-200 font-medium text-sm mb-2">
@@ -324,7 +340,6 @@ export default function StockInPage() {
             </div>
           )}
 
-          {/* Raw JSON */}
           <details className="rounded-md border border-zinc-700/50 bg-black/20 p-3">
             <summary className="cursor-pointer text-sm opacity-90">Toon raw JSON</summary>
             <pre className="mt-3 text-xs whitespace-pre-wrap">{JSON.stringify(result, null, 2)}</pre>

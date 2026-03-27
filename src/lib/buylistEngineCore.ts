@@ -149,6 +149,19 @@ export function computeUnitFromTrend(input: EngineInput): EngineResult {
   if (tix != null && tix > 1 && rank != null && rank < 250) bumpTo(0.90);
   if (ctx.lowStock && rank != null && rank < 500) bumpTo(Math.min(pct + 0.02, 0.92));
 
+  const isPremodern = isPremodernBoostSet(ctx.setCode);
+
+  // ✅ Niet-premodern high-end guardrails
+  // - > 200 EUR: geen high-end boosts meer, terug naar base pct
+  // - > 500 EUR: hard cap op 65%
+  if (!isPremodern) {
+    if (usedTrend >= 500) {
+      pct = 0.65;
+    } else if (usedTrend >= 200) {
+      pct = computeBasePctFromTrend(usedTrend);
+    }
+  }
+
   pct = Math.min(pct, 0.95);
 
   // unit + condition
