@@ -510,12 +510,15 @@ function sypTargetFromMaxQty(
   maxQty: number | null | undefined,
   setCode: string | null | undefined
 ) {
-  if (maxQty == null) {
-    return isPremodernSet(setCode) ? 4 : 2;
-  }
+  const fallback = isPremodernSet(setCode) ? 4 : 2;
 
-  const t = Math.floor(Number(maxQty) / 10);
-  return t < 0 ? 0 : t;
+  if (maxQty == null) return fallback;
+
+  const n = Number(maxQty);
+  if (!Number.isFinite(n)) return fallback;
+
+  const sypTarget = Math.max(0, Math.floor(n / 10));
+  return Math.max(fallback, sypTarget);
 }
 
 
