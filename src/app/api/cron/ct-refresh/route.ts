@@ -12,6 +12,13 @@ export const maxDuration = 60; // Pro-plan
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
 export async function GET(req: NextRequest) {
+  if (process.env.CT_REFRESH_DISABLED === "1") {
+  return NextResponse.json({
+    ok: true,
+    skipped: true,
+    reason: "ct-refresh tijdelijk disabled",
+  });
+}
   const t0 = Date.now();
   const WORK_BUDGET_MS = 45_000;              // werk binnen 45s
   const timeLeft = () => Math.max(0, WORK_BUDGET_MS - (Date.now() - t0));
