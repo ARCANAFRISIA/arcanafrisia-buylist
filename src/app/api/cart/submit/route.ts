@@ -91,17 +91,15 @@ function computeTargetFromMaxQty(
   maxQty: number | null | undefined,
   setCode: string | null | undefined
 ): number {
-  if (maxQty == null) {
-    return isPremodernSet(setCode) ? 4 : DEFAULT_TARGET_IF_NO_SYP;
-  }
+  const fallback = isPremodernSet(setCode) ? 4 : DEFAULT_TARGET_IF_NO_SYP;
+
+  if (maxQty == null) return fallback;
 
   const mq = Number(maxQty);
-  if (!Number.isFinite(mq) || mq <= 0) {
-    return isPremodernSet(setCode) ? 4 : DEFAULT_TARGET_IF_NO_SYP;
-  }
+  if (!Number.isFinite(mq) || mq <= 0) return fallback;
 
-  const t = Math.floor(mq / 10);
-  return t > 0 ? t : (isPremodernSet(setCode) ? 4 : DEFAULT_TARGET_IF_NO_SYP);
+  const sypTarget = Math.max(0, Math.floor(mq / 10));
+  return Math.max(fallback, sypTarget);
 }
 
 export async function POST(req: NextRequest) {
@@ -311,48 +309,46 @@ export async function POST(req: NextRequest) {
 
       const meta = metaById.get(cmId) ?? null;
 
-      const ownOnHand = ownOnHandById.get(cmId) ?? 0;
-      const pending = pendingById.get(cmId) ?? 0;
-      const ownTotal = ownOnHand + pending;
+const ownOnHand = ownOnHandById.get(cmId) ?? 0;
+const pending = pendingById.get(cmId) ?? 0;
+const ownTotal = ownOnHand + pending;
 
-      // prijs/allowed via engine
-      const { unit, pct, usedTrend, allowed } = computeUnitFromTrend({
-        trend,
-        trendFoil,
-        isFoil,
-        cond: condKey,
-        ctx: {
-          // engine overstock check baseer je op fysieke voorraad (onHand),
-          // SYP-cap doen wij op ownTotal (incl pending)
-          ownQty: ownOnHand,
-          edhrecRank: meta?.edhrecRank ?? null,
-          mtgoTix: meta?.tix ?? null,
-          gameChanger: meta?.gameChanger ?? null,
-          setCode: meta?.set ?? null,
-        },
-      });
+const tcg = tcgByCmId.get(cmId) ?? null;
+const maxQty = tcg != null ? (sypMaxByTcg.get(tcg) ?? null) : null;
+const target = computeTargetFromMaxQty(maxQty, meta?.set ?? null);
 
-      if (!allowed || !unit || unit <= 0) {
-        return {
-          cmId,
-          isFoil,
-          collectorNumber: meta?.collectorNumber ?? null,
-          qty: 0,
-          condKey,
-          trend,
-          trendFoil,
-          usedTrend,
-          unit: 0,
-          pct,
-          lineCents: 0,
-          allowed: false,
-          debug: { target: 0, maxQty: null as number | null, ownOnHand, pending },
-        };
-      }
+// prijs/allowed via engine
+const { unit, pct, usedTrend, allowed } = computeUnitFromTrend({
+  trend,
+  trendFoil,
+  isFoil,
+  cond: condKey,
+  ctx: {
+    ownQty: ownTotal,
+    edhrecRank: meta?.edhrecRank ?? null,
+    mtgoTix: meta?.tix ?? null,
+    gameChanger: meta?.gameChanger ?? null,
+    setCode: meta?.set ?? null,
+  },
+});
 
-      const tcg = tcgByCmId.get(cmId) ?? null;
-      const maxQty = tcg != null ? (sypMaxByTcg.get(tcg) ?? null) : null;
-      const target = computeTargetFromMaxQty(maxQty, meta?.set ?? null);
+if (!allowed || !unit || unit <= 0) {
+  return {
+    cmId,
+    isFoil,
+    collectorNumber: meta?.collectorNumber ?? null,
+    qty: 0,
+    condKey,
+    trend,
+    trendFoil,
+    usedTrend,
+    unit: 0,
+    pct,
+    lineCents: 0,
+    allowed: false,
+    debug: { target, maxQty, ownOnHand, pending },
+  };
+}
 
       let lim = limitsByCmId.get(cmId);
       if (!lim) {
@@ -407,12 +403,30 @@ export async function POST(req: NextRequest) {
 
     const filtered = computed.filter((r) => r.allowed);
 
-    if (!filtered.length) {
-      return NextResponse.json(
-        { ok: false, error: "Geen items (meer) buyable na server checks / caps" },
-        { status: 400 }
-      );
-    }
+  if (!filtered.length) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: "Geen items (meer) buyable na server checks / caps",
+      details: computed.map((r) => ({
+        cardmarketId: r.cmId,
+        qty: r.qty,
+        isFoil: r.isFoil,
+        cond: r.condKey,
+        target: r.debug.target,
+        maxQty: r.debug.maxQty,
+        ownOnHand: r.debug.ownOnHand,
+        pending: r.debug.pending,
+        trend: r.trend,
+        trendFoil: r.trendFoil,
+        usedTrend: r.usedTrend,
+        unit: r.unit,
+        allowed: r.allowed,
+      })),
+    },
+    { status: 400 }
+  );
+}
 
     const shippingMethodRaw = meta?.shippingMethod;
     const shippingMethod: "SELF" | "LABEL" =
