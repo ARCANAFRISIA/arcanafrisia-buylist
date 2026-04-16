@@ -25,7 +25,7 @@ type SFResp = {
 };
 
 type FetchOk = { ok: true; data: SFResp };
-type FetchErr = { ok: false; code: number };
+type FetchErr = { ok: false; code: number; body?: string };
 type FetchResult = FetchOk | FetchErr;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -46,22 +46,48 @@ function extractImages(data: SFResp) {
   return { imgSmall, imgNormal };
 }
 
+function nextBackoffMs(attemptsSoFar: number): number {
+  // 5m, 10m, 20m, max 60m
+  const minutes = Math.min(60, 5 * Math.pow(2, Math.max(0, attemptsSoFar)));
+  return minutes * 60 * 1000;
+}
+
 async function fetchOne(cardmarketId: number): Promise<FetchResult> {
-  const res = await fetch(`${SCRYFALL_BASE}/${cardmarketId}`, { cache: "no-store" });
-  if (res.status === 404) return { ok: false, code: 404 }; // definitief
-  if (!res.ok) return { ok: false, code: res.status };    // tijdelijk
+  const res = await fetch(`${SCRYFALL_BASE}/${cardmarketId}`, {
+    cache: "no-store",
+  });
+
+  if (res.status === 404) {
+    return {
+      ok: false,
+      code: 404,
+      body: await res.text().catch(() => ""),
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      code: res.status,
+      body: await res.text().catch(() => ""),
+    };
+  }
+
   const data = (await res.json()) as SFResp;
   return { ok: true, data };
 }
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const batch = Number(url.searchParams.get("batch") ?? 120);
-  const conc = Number(url.searchParams.get("concurrency") ?? 8);
+  const batch = Math.max(1, Number(url.searchParams.get("batch") ?? 120));
+  const conc = Math.max(1, Number(url.searchParams.get("concurrency") ?? 8));
 
   const now = new Date();
 
-  // ✅ Pak alleen jobs die echt "ready" zijn (backoff respecteren)
+  // Alleen actieve jobs:
+  // - niet notFound
+  // - nog binnen retry-limit
+  // - ready qua backoff
   const jobs = await prisma.scryfallLookupQueue.findMany({
     where: {
       notFound: false,
@@ -73,26 +99,50 @@ export async function GET(req: Request) {
   });
 
   if (jobs.length === 0) {
-    const remainingReady = await prisma.scryfallLookupQueue.count({
+    const queueReady = await prisma.scryfallLookupQueue.count({
       where: {
         notFound: false,
         attempts: { lte: 3 },
         OR: [{ nextTryAt: null }, { nextTryAt: { lte: now } }],
       },
     });
-    const remainingAll = await prisma.scryfallLookupQueue.count();
-    const total = await prisma.scryfallLookup.count();
+
+    const queueWaiting = await prisma.scryfallLookupQueue.count({
+      where: {
+        notFound: false,
+        attempts: { lte: 3 },
+        nextTryAt: { gt: now },
+      },
+    });
+
+    const queueFailed = await prisma.scryfallLookupQueue.count({
+      where: {
+        notFound: false,
+        attempts: { gt: 3 },
+      },
+    });
+
+    const queueNotFound = await prisma.scryfallLookupQueue.count({
+      where: { notFound: true },
+    });
+
+    const totalLookup = await prisma.scryfallLookup.count();
+
     return NextResponse.json({
       status: "idle",
       processed: 0,
-      remainingQueueReady: remainingReady,
-      remainingQueueAll: remainingAll,
-      total,
+      queueReady,
+      queueWaiting,
+      queueFailed,
+      queueNotFound,
+      totalLookup,
     });
   }
 
   const chunks: typeof jobs[] = [];
-  for (let i = 0; i < jobs.length; i += conc) chunks.push(jobs.slice(i, i + conc));
+  for (let i = 0; i < jobs.length; i += conc) {
+    chunks.push(jobs.slice(i, i + conc));
+  }
 
   let processed = 0;
   const toDelete: number[] = [];
@@ -105,7 +155,8 @@ export async function GET(req: Request) {
 
           if (!r.ok) {
             if (r.code === 404) {
-              // ✅ definitief: markeer en haal uit queue
+              // Definitieve miss:
+              // bewaren in queue als notFound voor inzicht/debugging
               await prisma.scryfallLookupQueue.update({
                 where: { id: job.id },
                 data: {
@@ -115,18 +166,28 @@ export async function GET(req: Request) {
                   nextTryAt: null,
                 },
               });
-              return { del: true, jobId: job.id };
+
+              return { del: false, jobId: job.id };
             }
 
-            // ✅ tijdelijk: backoff + attempts + later retry
+            // Tijdelijke fout: retry met backoff
+            const nextTryAt = new Date(
+              Date.now() + nextBackoffMs(job.attempts)
+            );
+
+            const errorText = `HTTP ${r.code}${
+              r.body ? ` - ${r.body.slice(0, 300)}` : ""
+            }`;
+
             await prisma.scryfallLookupQueue.update({
               where: { id: job.id },
               data: {
                 attempts: { increment: 1 },
-                lastError: `HTTP ${r.code}`,
-                nextTryAt: new Date(Date.now() + 15 * 60 * 1000),
+                lastError: errorText,
+                nextTryAt,
               },
             });
+
             return { del: false, jobId: job.id };
           }
 
@@ -151,12 +212,10 @@ export async function GET(req: Request) {
               eur: parsePrice(data.prices?.eur),
               tix: parsePrice(data.prices?.tix),
               edhrecRank: data.edhrec_rank ?? null,
-              legalities: {
-                set:
-                  data.legalities !== undefined && data.legalities !== null
-                    ? (data.legalities as Prisma.JsonValue)
-                    : null,
-              },
+         legalities:
+  data.legalities != null
+    ? (data.legalities as Prisma.InputJsonValue)
+    : Prisma.DbNull,
               gameChanger: data.game_changer ?? null,
             },
             update: {
@@ -173,27 +232,30 @@ export async function GET(req: Request) {
               eur: parsePrice(data.prices?.eur),
               tix: parsePrice(data.prices?.tix),
               edhrecRank: data.edhrec_rank ?? null,
-              legalities: {
-                set:
-                  data.legalities !== undefined && data.legalities !== null
-                    ? (data.legalities as Prisma.JsonValue)
-                    : null,
-              },
+         legalities:
+  data.legalities != null
+    ? (data.legalities as Prisma.InputJsonValue)
+    : Prisma.DbNull,
               gameChanger: data.game_changer ?? null,
             },
           });
 
+          // Succes: job uit queue verwijderen
           return { del: true, jobId: job.id };
         } catch (e: any) {
-          // ✅ exception/netwerk: backoff + attempts
+          const nextTryAt = new Date(
+            Date.now() + nextBackoffMs(job.attempts)
+          );
+
           await prisma.scryfallLookupQueue.update({
             where: { id: job.id },
             data: {
               attempts: { increment: 1 },
-              lastError: String(e?.message || e),
-              nextTryAt: new Date(Date.now() + 15 * 60 * 1000),
+              lastError: String(e?.message || e).slice(0, 500),
+              nextTryAt,
             },
           });
+
           return { del: false, jobId: job.id };
         }
       })
@@ -207,31 +269,49 @@ export async function GET(req: Request) {
     await sleep(150);
   }
 
-  // ✅ verwijder successen + 404-definitief uit queue
+  // Alleen successen uit queue halen
   if (toDelete.length) {
-    await prisma.scryfallLookupQueue.deleteMany({ where: { id: { in: toDelete } } });
+    await prisma.scryfallLookupQueue.deleteMany({
+      where: { id: { in: toDelete } },
+    });
   }
 
-  // ✅ drop jobs die te vaak gefaald hebben
-  await prisma.scryfallLookupQueue.deleteMany({
-    where: { attempts: { gt: 3 } },
-  });
-
-  const remainingReady = await prisma.scryfallLookupQueue.count({
+  const queueReady = await prisma.scryfallLookupQueue.count({
     where: {
       notFound: false,
       attempts: { lte: 3 },
       OR: [{ nextTryAt: null }, { nextTryAt: { lte: new Date() } }],
     },
   });
-  const remainingAll = await prisma.scryfallLookupQueue.count();
-  const total = await prisma.scryfallLookup.count();
+
+  const queueWaiting = await prisma.scryfallLookupQueue.count({
+    where: {
+      notFound: false,
+      attempts: { lte: 3 },
+      nextTryAt: { gt: new Date() },
+    },
+  });
+
+  const queueFailed = await prisma.scryfallLookupQueue.count({
+    where: {
+      notFound: false,
+      attempts: { gt: 3 },
+    },
+  });
+
+  const queueNotFound = await prisma.scryfallLookupQueue.count({
+    where: { notFound: true },
+  });
+
+  const totalLookup = await prisma.scryfallLookup.count();
 
   return NextResponse.json({
     status: "processing",
     processed,
-    remainingQueueReady: remainingReady,
-    remainingQueueAll: remainingAll,
-    total,
+    queueReady,
+    queueWaiting,
+    queueFailed,
+    queueNotFound,
+    totalLookup,
   });
 }

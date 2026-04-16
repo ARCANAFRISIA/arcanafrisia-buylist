@@ -38,7 +38,7 @@ export default function PostSalesPage() {
     return `/api/export/post-sales?${params.toString()}`;
   };
 
-  // CM full physical export (lot-based, PM core only)
+  // CM full physical export (lot-based, all non-CB stock)
   const downloadCmFullPhysical = () => {
     const params = new URLSearchParams();
     params.set("channel", "CM");
@@ -93,9 +93,9 @@ export default function PostSalesPage() {
 
   const helperText = useMemo(() => {
     if (!isCTBULK) {
-      return "CM exporteert alleen Premodern core voorraad uit locaties PM-*-EX en PM-*-GD. PM-PLAYED gaat nooit mee.";
+      return "CM exporteert weer breed uit alle niet-CB locaties. Newstock = recent geüpload, relist = recent verkocht, full = huidige CM-voorraad.";
     }
-    return "CTBULK exporteert alleen voorraad uit CB-locaties. PM-EX/GD en PM-PLAYED worden uitgesloten.";
+    return "CTBULK exporteert alleen voorraad uit CB-locaties.";
   }, [isCTBULK]);
 
   return (
@@ -181,7 +181,7 @@ export default function PostSalesPage() {
           onClick={downloadCmFullPhysical}
           className="rounded-xl px-4 py-2 border hover:opacity-90"
         >
-          CM FULL PM physical CSV
+          CM FULL physical CSV
         </button>
       </div>
 

@@ -63,6 +63,7 @@ model SubmissionItem {
   id             String     @id @default(cuid())
   submissionId   String
   productId      BigInt
+  pokemonId       String?
   collectorNumber String?
   cardName        String?
   setCode         String?
@@ -78,6 +79,7 @@ model SubmissionItem {
 
   @@index([submissionId])
   @@index([productId])
+  @@index([pokemonId])
 }
 
 model CTMarketSummary {
@@ -463,3 +465,20 @@ model TcgSkuMap {
   @@index([productId])
 }
 
+model ScryfallTixFallback {
+  scryfallId      String   @id
+  oracleId        String?
+  name            String
+  set             String
+  collectorNumber String?
+  lang            String?
+  rarity          String?
+  usd             Float?
+  eur             Float?
+  tix             Float?
+  updatedAt       DateTime @updatedAt
+
+  @@index([oracleId])
+  @@index([name])
+  @@index([set])
+}

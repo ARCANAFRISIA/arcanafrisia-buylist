@@ -17,7 +17,6 @@ type PickRow = {
   sourceCode: string;
   sourceDate: string;
   unitCostEur: number;
-  routeTarget: "PM_CORE" | "PM_PLAYED" | "CTBULK";
 };
 
 type UploadResult = {
@@ -26,16 +25,101 @@ type UploadResult = {
   rowsConsolidated?: number;
   lotsCreated?: number;
   balancesUpserted?: number;
-  routeCounts?: {
-    PM_CORE?: number;
-    PM_PLAYED?: number;
-    CTBULK?: number;
-  };
+  setLocationCount?: number;
   rowErrors?: { line: number; message: string }[];
   warnings?: any[];
   picklist?: PickRow[];
   error?: string;
 };
+
+type PreviewRow = {
+  line: number;
+  cardmarketId: string;
+  qty: string;
+  condition: string;
+  language: string;
+  sourceCode: string;
+  unitCostEur: string;
+  name: string;
+};
+
+function detectDelimiter(text: string) {
+  const firstLine = (text || "").split(/\r?\n/)[0] || "";
+  const commas = (firstLine.match(/,/g) || []).length;
+  const semicolons = (firstLine.match(/;/g) || []).length;
+  return semicolons > commas ? ";" : ",";
+}
+
+function parseCsvLine(line: string, delimiter: string) {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    const next = line[i + 1];
+
+    if (ch === '"') {
+      if (inQuotes && next === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (ch === delimiter && !inQuotes) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+
+    cur += ch;
+  }
+
+  out.push(cur);
+  return out.map((s) => s.trim());
+}
+
+function normalizeHeader(s: string) {
+  return String(s || "").replace(/^\uFEFF/, "").trim();
+}
+
+function getField(row: Record<string, string>, keys: string[]) {
+  for (const key of keys) {
+    const v = row[key];
+    if (v != null && String(v).trim() !== "") return String(v).trim();
+  }
+  return "";
+}
+
+function normalizeCondition(v: string) {
+  const s = String(v || "").trim().toUpperCase();
+  if (!s) return "";
+  if (s === "NEAR MINT") return "NM";
+  if (s === "MINT") return "NM";
+  if (s === "EXCELLENT") return "EX";
+  if (s === "GOOD") return "GD";
+  if (s === "LIGHT PLAYED") return "LP";
+  if (s === "MODERATE PLAYED") return "MP";
+  if (s === "HEAVY PLAYED") return "HP";
+  if (s === "POOR") return "PO";
+  return s;
+}
+
+function normalizeLanguage(v: string) {
+  const s = String(v || "").trim().toLowerCase();
+  if (!s) return "EN";
+  if (["english", "en", "eng"].includes(s)) return "EN";
+  if (["german", "de", "ger", "deutsch"].includes(s)) return "DE";
+  if (["french", "fr", "fra", "français", "francais"].includes(s)) return "FR";
+  if (["spanish", "es", "spa", "español", "espanol"].includes(s)) return "ES";
+  if (["italian", "it", "ita", "italiano"].includes(s)) return "IT";
+  if (["portuguese", "pt", "por"].includes(s)) return "PT";
+  if (["japanese", "jp", "ja"].includes(s)) return "JP";
+  return String(v || "EN").trim().toUpperCase();
+}
 
 export default function StockInPage() {
   const [csvText, setCsvText] = useState("");
@@ -91,13 +175,64 @@ export default function StockInPage() {
     return (result?.picklist ?? []).filter((r) => r && r.location);
   }, [result]);
 
+  const csvPreview = useMemo<PreviewRow[]>(() => {
+    if (!csvText.trim()) return [];
+
+    const lines = csvText
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0);
+
+    if (lines.length < 2) return [];
+
+    const delimiter = detectDelimiter(csvText);
+    const headers = parseCsvLine(lines[0], delimiter).map(normalizeHeader);
+
+    const previewRows: PreviewRow[] = [];
+
+    for (let i = 1; i < lines.length && previewRows.length < 12; i++) {
+      const values = parseCsvLine(lines[i], delimiter);
+
+      const row: Record<string, string> = {};
+      headers.forEach((h, idx) => {
+        row[h] = values[idx] ?? "";
+      });
+
+      const cardmarketId = getField(row, ["cardmarketId", "CardmarketId", "idProduct"]);
+      const qty = getField(row, ["qty", "quantity", "qtyOnHand"]);
+      const condition = normalizeCondition(getField(row, ["condition", "state"]));
+      const language = normalizeLanguage(getField(row, ["language", "lang"]));
+      const sourceCode =
+        getField(row, ["sourceCode"]) ||
+        getField(row, ["comment"]) ||
+        defaultSourceCode ||
+        "IMPORT";
+      const unitCostEur =
+        getField(row, ["unitCostEur", "avgUnitCostEur", "costPrice"]) ||
+        getField(row, ["price"]) ||
+        "";
+      const name = getField(row, ["name"]);
+
+      previewRows.push({
+        line: i + 1,
+        cardmarketId,
+        qty,
+        condition,
+        language,
+        sourceCode,
+        unitCostEur,
+        name,
+      });
+    }
+
+    return previewRows;
+  }, [csvText, defaultSourceCode]);
+
   function downloadPicklistCsv() {
     const rows = picklist;
     if (!rows.length) return;
 
     const header = [
       "location",
-      "routeTarget",
       "set",
       "name",
       "collectorNumber",
@@ -113,7 +248,9 @@ export default function StockInPage() {
 
     const esc = (v: any) => {
       const s = v == null ? "" : String(v);
-      if (s.includes(",") || s.includes('"') || s.includes("\n")) return `"${s.replace(/"/g, '""')}"`;
+      if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+        return `"${s.replace(/"/g, '""')}"`;
+      }
       return s;
     };
 
@@ -124,7 +261,6 @@ export default function StockInPage() {
         .map((r) =>
           [
             r.location,
-            r.routeTarget,
             r.set,
             r.name,
             r.collectorNumber ?? "",
@@ -156,10 +292,14 @@ export default function StockInPage() {
       <h1 className="text-2xl font-semibold">Stock-in CSV upload</h1>
 
       <div className="space-y-2 text-sm">
-        <p>Verwacht CSV-header (komma of puntkomma):</p>
+        <p>Velden die wij gebruiken:</p>
         <pre className="bg-black/40 p-2 rounded text-xs overflow-x-auto">
-          cardmarketId,isFoil,condition,qty,unitCostEur,sourceCode,sourceDate,language
+{`cardmarketId, quantity/qty, condition, language, sourceCode/comment, unitCostEur/price, name`}
         </pre>
+      </div>
+
+      <div className="text-sm opacity-80">
+        Alles wat je hier uploadt komt binnen op set-locatie als <span className="font-mono">SET-SETCODE</span>.
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -189,14 +329,57 @@ export default function StockInPage() {
         </div>
       </div>
 
-      <div className="space-y-2">
-        <label className="text-sm font-medium">CSV inhoud (optioneel bekijken/bijwerken)</label>
-        <textarea
-          className="min-h-[160px] w-full rounded-md border px-3 py-2 bg-black/20 font-mono text-xs"
-          value={csvText}
-          onChange={(e) => setCsvText(e.target.value)}
-        />
-      </div>
+      {csvPreview.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-sm font-medium">Preview wat er wordt opgepakt</div>
+          <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/10">
+            <table className="min-w-full text-sm">
+              <thead className="bg-black/30">
+                <tr>
+                  <th className="text-left p-2">line</th>
+                  <th className="text-left p-2">cmid</th>
+                  <th className="text-right p-2">qty</th>
+                  <th className="text-left p-2">cond</th>
+                  <th className="text-left p-2">lang</th>
+                  <th className="text-left p-2">source</th>
+                  <th className="text-right p-2">cost</th>
+                  <th className="text-left p-2">name</th>
+                </tr>
+              </thead>
+              <tbody>
+                {csvPreview.map((r) => (
+                  <tr key={r.line} className="odd:bg-black/10">
+                    <td className="p-2 font-mono">{r.line}</td>
+                    <td className="p-2 font-mono">{r.cardmarketId || "—"}</td>
+                    <td className="p-2 text-right font-mono">{r.qty || "—"}</td>
+                    <td className="p-2 font-mono">{r.condition || "—"}</td>
+                    <td className="p-2 font-mono">{r.language || "—"}</td>
+                    <td className="p-2 font-mono">{r.sourceCode || "—"}</td>
+                    <td className="p-2 text-right font-mono">{r.unitCostEur || "—"}</td>
+                    <td className="p-2">{r.name || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="text-xs opacity-70">
+            Preview toont de eerste 12 regels zoals de importer ze uitleest.
+          </div>
+        </div>
+      )}
+
+      <details className="space-y-2">
+        <summary className="cursor-pointer text-sm font-medium opacity-90">
+          Toon ruwe CSV-inhoud
+        </summary>
+        <div className="pt-2">
+          <textarea
+            className="min-h-[160px] w-full rounded-md border px-3 py-2 bg-black/20 font-mono text-xs"
+            value={csvText}
+            onChange={(e) => setCsvText(e.target.value)}
+          />
+        </div>
+      </details>
 
       <Button onClick={handleUpload} disabled={loading || !csvText} className="min-w-[180px]">
         {loading ? "Uploaden…" : "Stock-in verwerken"}
@@ -224,23 +407,21 @@ export default function StockInPage() {
               {typeof result.rowsConsolidated === "number"
                 ? ` · rowsConsolidated: ${result.rowsConsolidated}`
                 : ""}
+              {typeof result.setLocationCount === "number"
+                ? ` · setLocations: ${result.setLocationCount}`
+                : ""}
             </div>
 
-            {result.routeCounts && (
-              <div className="opacity-90 mt-1">
-                PM_CORE: {result.routeCounts.PM_CORE ?? 0} · PM_PLAYED:{" "}
-                {result.routeCounts.PM_PLAYED ?? 0} · CTBULK: {result.routeCounts.CTBULK ?? 0}
-              </div>
+            {picklist.length > 0 && (
+              <div className="opacity-90 mt-1">picklist rows: {picklist.length}</div>
             )}
-
-            {picklist.length > 0 && <div className="opacity-90 mt-1">picklist rows: {picklist.length}</div>}
           </div>
 
           {picklist.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="text-sm opacity-80">
-                  Picklist (gesorteerd): location → set → name → condition
+                  Picklist: location → set → name → condition
                 </div>
                 <Button variant="secondary" onClick={downloadPicklistCsv}>
                   Download picklist CSV
@@ -252,7 +433,6 @@ export default function StockInPage() {
                   <thead className="bg-black/30">
                     <tr>
                       <th className="text-left p-2">location</th>
-                      <th className="text-left p-2">route</th>
                       <th className="text-left p-2">set</th>
                       <th className="text-left p-2">name</th>
                       <th className="text-left p-2">#</th>
@@ -269,7 +449,6 @@ export default function StockInPage() {
                     {picklist.map((r, i) => (
                       <tr key={i} className="odd:bg-black/10">
                         <td className="p-2 font-mono">{r.location}</td>
-                        <td className="p-2 font-mono">{r.routeTarget}</td>
                         <td className="p-2 font-mono">{r.set || "—"}</td>
                         <td className="p-2">{r.name || "—"}</td>
                         <td className="p-2 font-mono">{r.collectorNumber ?? "—"}</td>
@@ -287,9 +466,7 @@ export default function StockInPage() {
               </div>
 
               <div className="text-xs opacity-70">
-                Tip: dit is exact je neerleg-lijst voor deze upload. PM-SET-EX / PM-SET-GD leg je
-                in de juiste setdoos-sectie, PM-PLAYED in je played-doos, en CB-locaties blijven je
-                CT-flow.
+                Dit is je neerleg-lijst voor deze upload.
               </div>
             </div>
           )}

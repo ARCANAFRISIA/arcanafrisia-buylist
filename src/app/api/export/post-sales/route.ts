@@ -182,7 +182,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ---- CM eligible qty map (only PM-*-EX / PM-*-GD) ----
+  // ---- CM eligible qty map (all non-CB locations) ----
   const cmQtyMap = new Map<string, number>();
   {
     type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: any };
@@ -198,10 +198,7 @@ export async function GET(req: NextRequest) {
       WHERE "cardmarketId" = ANY($1)
         AND "qtyRemaining" > 0
         AND "location" IS NOT NULL
-        AND (
-          "location" LIKE 'PM-%-EX'
-          OR "location" LIKE 'PM-%-GD'
-        )
+        AND "location" NOT LIKE 'CB-%'
       GROUP BY 1,2,3,4
       `,
       cmIds
@@ -241,7 +238,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ---- newStockMap CM ----
+  // ---- newStockMap CM (all non-CB locations) ----
   const newStockMapCM = new Map<string, number>();
   if (mode === "newstock") {
     type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: any };
@@ -257,10 +254,7 @@ export async function GET(req: NextRequest) {
       WHERE "sourceDate" >= $1
         AND "qtyRemaining" > 0
         AND "location" IS NOT NULL
-        AND (
-          "location" LIKE 'PM-%-EX'
-          OR "location" LIKE 'PM-%-GD'
-        )
+        AND "location" NOT LIKE 'CB-%'
       GROUP BY 1,2,3,4
       `,
       effectiveSince as any
@@ -385,7 +379,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ---- first CM meta map (only PM core locations) ----
+  // ---- first CM meta map (all non-CB locations) ----
   const firstCmLotMap = new Map<string, { sourceCode: string | null; location: string | null }>();
   {
     type Row = {
@@ -410,10 +404,7 @@ export async function GET(req: NextRequest) {
       WHERE "cardmarketId" = ANY($1)
         AND "qtyRemaining" > 0
         AND "location" IS NOT NULL
-        AND (
-          "location" LIKE 'PM-%-EX'
-          OR "location" LIKE 'PM-%-GD'
-        )
+        AND "location" NOT LIKE 'CB-%'
       ORDER BY
         "cardmarketId",
         COALESCE("isFoil",false),
@@ -567,7 +558,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // ---- CM physical lot-based rows (only PM core locations) ----
+  // ---- CM physical lot-based rows (all non-CB locations) ----
   let cmPhysicalRows: LotAggRow[] = [];
   if (channel === "CM" && mode === "full" && physical) {
     cmPhysicalRows = await prisma.$queryRawUnsafe<LotAggRow[]>(
@@ -584,10 +575,7 @@ export async function GET(req: NextRequest) {
       WHERE "qtyRemaining" > 0
         AND "location" IS NOT NULL
         AND "sourceCode" IS NOT NULL
-        AND (
-          "location" LIKE 'PM-%-EX'
-          OR "location" LIKE 'PM-%-GD'
-        )
+        AND "location" NOT LIKE 'CB-%'
       GROUP BY 1,2,3,4,5,6
       HAVING COALESCE(SUM("qtyRemaining"),0) > 0
       ORDER BY "cardmarketId","isFoil","condition","language","location","sourceCode"
@@ -694,7 +682,7 @@ export async function GET(req: NextRequest) {
         price = 1000;
       }
 
-      const step = 0.05;
+      const step = Number(policy?.roundingStepEur ?? 0.05) || 0.05;
       if (price != null && price > 0) price = roundStep(price, step);
       if (price == null || !(price > 0)) continue;
 
@@ -712,9 +700,9 @@ export async function GET(req: NextRequest) {
           csvEscape(lang),
           csvEscape(addQty),
           csvEscape(price.toFixed(2)),
-          csvEscape("PM_CORE"),
+          csvEscape(policy?.name ?? "CM"),
           csvEscape(sourceCode),
-          csvEscape("PM_CORE"),
+          csvEscape("REGULAR"),
           csvEscape(location),
           csvEscape(comment),
         ].join(",") + "\n"
@@ -737,7 +725,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ---- CM balance-based flow ----
+  // ---- broad CM flow / CT flow ----
   for (const b of balances) {
     if (b.qtyOnHand <= 0) continue;
 
@@ -859,7 +847,7 @@ export async function GET(req: NextRequest) {
 
     const comment = buildComment(channel, meta.location, meta.sourceCode);
     const policyName = channel === "CTBULK" ? "CTBULK" : (policy?.name ?? "");
-    const stockClass = channel === "CM" ? "PM_CORE" : "CTBULK";
+    const stockClass = channel === "CM" ? "REGULAR" : "CTBULK";
 
     lines.push(
       [
