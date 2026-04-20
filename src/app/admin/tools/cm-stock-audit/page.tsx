@@ -84,11 +84,25 @@ export default function CmStockAuditPage() {
       <p className="text-sm text-muted-foreground">
         Upload hier je Cardmarket stock export (CSV met o.a.{" "}
         <code>idProduct</code>, <code>Count</code>, <code>Language</code>,{" "}
-        <code>Condition</code>). De tool vergelijkt dit met je
-        InventoryBalance + ListPolicy en maakt drie CSV&apos;s:
-        &nbsp;&quot;te veel&quot;, &quot;te weinig&quot; en
-        &quot;stock mismatch&quot;.
+        <code>Condition</code>). De tool vergelijkt je live CM-voorraad met je
+        CM-eligible voorraad uit non-CB locaties en met je huidige CM policy
+        inclusief playset premium voor non-foil kaarten met voldoende tix.
       </p>
+
+      <div className="text-sm text-muted-foreground border rounded-lg p-4 space-y-1">
+        <div>
+          <strong>Te veel op CM</strong>: je hebt meer online staan dan wenselijk
+          of veilig is op basis van voorraad en policy.
+        </div>
+        <div>
+          <strong>Te weinig op CM</strong>: je hebt minder online staan dan je
+          volgens de huidige policy zou willen listen.
+        </div>
+        <div>
+          <strong>Stock mismatch</strong>: verschil tussen live CM en je
+          CM-eligible fysieke voorraad.
+        </div>
+      </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
@@ -124,11 +138,11 @@ export default function CmStockAuditPage() {
       {summary && (
         <div className="space-y-2 border rounded-lg p-4">
           <h2 className="font-medium">Resultaat</h2>
-          <ul className="text-sm">
+          <ul className="text-sm space-y-1">
             <li>Totaal SKU&apos;s: {summary.totalSkus}</li>
             <li>Te veel op CM: {summary.tooMuch}</li>
             <li>Te weinig op CM: {summary.tooLittle}</li>
-            <li>Stock mismatch (CM vs onHand): {summary.stockMismatch}</li>
+            <li>Stock mismatch (CM vs CM-eligible voorraad): {summary.stockMismatch}</li>
           </ul>
         </div>
       )}
@@ -148,6 +162,7 @@ export default function CmStockAuditPage() {
             >
               Te veel op CM
             </Button>
+
             <Button
               type="button"
               variant="outline"
@@ -159,6 +174,7 @@ export default function CmStockAuditPage() {
             >
               Te weinig op CM
             </Button>
+
             <Button
               type="button"
               variant="outline"

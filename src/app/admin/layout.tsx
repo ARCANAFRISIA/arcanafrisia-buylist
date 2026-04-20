@@ -15,7 +15,7 @@ const links = [
   { href: "/admin/tools/ct1day", label: "ct1day" },
   { href: "/admin/location/worklist", label: "location worklist" },
   { href: "/admin/syp-overview", label: "syp overview" },
-
+  { href: "/admin/syp", label: "AF-SYPS" },
 
 ];
 

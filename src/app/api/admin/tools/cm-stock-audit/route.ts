@@ -10,10 +10,10 @@ type CmRow = {
   cardmarketId: number;
   name: string | null;
   setCode: string | null;
-  language: string;   // interne code, bijv "EN"
-  condition: string;  // "NM", "EX", ...
+  language: string;
+  condition: string;
   isFoil: boolean;
-  qty: number;        // aantal kaarten (playsets al uitgeklapt)
+  qty: number; // playsets already expanded
 };
 
 type InvRow = {
@@ -23,8 +23,7 @@ type InvRow = {
   language: string;
   condition: string;
   isFoil: boolean;
-  qtyOnHand: number;
-  
+  qtyOnHand: number; // CM-eligible qty only
 };
 
 type Tier = {
@@ -41,10 +40,23 @@ type AuditRow = {
   condition: string;
   isFoil: boolean;
   cmQty: number;
-  onHand: number;
+  onHand: number; // CM-eligible qty
   desiredOnline: number;
   deltaPolicy: number;
   deltaStock: number;
+};
+
+type LookupRow = {
+  cardmarketId: number;
+  scryfallId: string | null;
+  oracleId: string | null;
+  tix: number | null;
+};
+
+type FallbackRow = {
+  scryfallId: string;
+  oracleId: string | null;
+  tix: number | null;
 };
 
 // ---- helpers ----
@@ -84,19 +96,52 @@ function normalizeCMCondition(raw: string): string {
   return v;
 }
 
+function normalizeInvCondition(raw: string): string {
+  const v = (raw || "").trim().toUpperCase();
+  if (v === "NEAR MINT") return "NM";
+  if (v === "SLIGHTLY PLAYED") return "EX";
+  if (v === "MODERATELY PLAYED") return "GD";
+  if (v === "PLAYED" || v === "LP" || v === "PL") return "PL";
+  if (v === "HEAVILY PLAYED") return "PL";
+  return v || "NM";
+}
+
 function parseBooleanFoil(raw: string): boolean {
   const v = raw.trim().toLowerCase();
   if (!v) return false;
   return ["yes", "foil", "foiled", "1", "true"].includes(v);
 }
 
-function computeDesiredOnline(qtyOnHand: number, tiers: Tier[]): number {
+function getBaseCap(qtyOnHand: number, tiers: Tier[]): number {
   if (!tiers.length) return 0;
   const sorted = [...tiers].sort((a, b) => b.minOnHand - a.minOnHand);
   for (const t of sorted) {
     if (qtyOnHand >= t.minOnHand) return t.listQty;
   }
   return 0;
+}
+
+function applyPlaysetPremium(params: {
+  baseCap: number;
+  qty: number;
+  isFoil: boolean;
+  tix: number | null | undefined;
+}) {
+  const { baseCap, qty, isFoil, tix } = params;
+  if (isFoil) return baseCap;
+  if (qty < 4) return baseCap;
+  if (tix == null || !(tix > 3)) return baseCap;
+  return Math.max(baseCap, 4);
+}
+
+function computeDesiredOnline(qtyOnHand: number, tiers: Tier[], isFoil: boolean, tix: number | null | undefined): number {
+  const baseCap = getBaseCap(qtyOnHand, tiers);
+  return applyPlaysetPremium({
+    baseCap,
+    qty: qtyOnHand,
+    isFoil,
+    tix,
+  });
 }
 
 function toCsvLine(values: (string | number | boolean)[], sep = ";"): string {
@@ -123,7 +168,7 @@ function splitCsvLine(line: string, sep: string): string[] {
 
     if (ch === '"') {
       inQuotes = !inQuotes;
-      current += ch; // quotes laten zitten, strippen we later
+      current += ch;
     } else if (ch === sep && !inQuotes) {
       result.push(current);
       current = "";
@@ -137,7 +182,6 @@ function splitCsvLine(line: string, sep: string): string[] {
 }
 
 function normalizeHeaderName(raw: string): string {
-  // BOM weg, trimmen, quotes eraf, lowercased
   let s = raw.replace(/^\uFEFF/, "").trim();
   if (s.startsWith('"') && s.endsWith('"')) {
     s = s.slice(1, -1);
@@ -145,7 +189,7 @@ function normalizeHeaderName(raw: string): string {
   return s.trim().toLowerCase();
 }
 
-// ---- CSV parser voor de Cardmarket export ----
+// ---- CSV parser for Cardmarket export ----
 
 function parseCmCsv(text: string): CmRow[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -153,7 +197,6 @@ function parseCmCsv(text: string): CmRow[] {
 
   const headerLine = lines[0];
 
-  // delimiter detecteren: ; of , (Cardmarket gebruikt vaak ;)
   const sep =
     (headerLine.match(/;/g)?.length || 0) >=
     (headerLine.match(/,/g)?.length || 0)
@@ -165,20 +208,17 @@ function parseCmCsv(text: string): CmRow[] {
 
   const idx = (name: string) => header.indexOf(name.toLowerCase());
 
-  // idProduct of cardmarketId
   const iId =
     idx("idproduct") !== -1 ? idx("idproduct") : idx("cardmarketid");
 
-  // count of quantity
   const iQty =
     idx("count") !== -1 ? idx("count") : idx("quantity");
 
   const iLang = idx("language");
   const iCond = idx("condition");
   const iFoil = idx("isfoil");
-  const iPlayset = idx("isplayset"); // optioneel
+  const iPlayset = idx("isplayset");
 
-  // kaartnaam & setcode uit export (best-effort)
   const iName = header.findIndex((h) =>
     ["product", "name", "card", "productname"].includes(h)
   );
@@ -274,61 +314,163 @@ export async function POST(req: NextRequest) {
       cmCardmarketIds.add(row.cardmarketId);
     }
 
-    // policies + tiers
-    const policies = await prisma.listPolicy.findMany({
+    // CM policy + tiers
+    const policy = await prisma.listPolicy.findFirst({
+      where: { channel: "CM", enabled: true },
       include: { tiers: true },
     });
 
-    const tiersByPolicyId = new Map<number, Tier[]>();
-    for (const p of policies) {
-      tiersByPolicyId.set(
-        p.id,
-        p.tiers.map((t) => ({
-          minOnHand: t.minOnHand,
-          listQty: t.listQty,
-        }))
+    if (!policy) {
+      return NextResponse.json(
+        { ok: false, error: "No enabled ListPolicy for CM channel." },
+        { status: 400 }
       );
     }
 
-    // InventoryBalance
-const balances = await prisma.inventoryBalance.findMany({
-  where: {
-    OR: [
-      { qtyOnHand: { gt: 0 } },
-      { cardmarketId: { in: Array.from(cmCardmarketIds) } },
-    ],
-  },
-  select: {
-    cardmarketId: true,
-    language: true,
-    condition: true,
-    isFoil: true,
-    qtyOnHand: true,
-    
-  },
-});
+    const tiers: Tier[] = policy.tiers
+      .map((t) => ({
+        minOnHand: t.minOnHand,
+        listQty: t.listQty,
+      }))
+      .sort((a, b) => b.minOnHand - a.minOnHand);
 
+    // InventoryLot -> CM eligible qty only (non-CB)
+    type LotAgg = {
+      cardmarketId: number;
+      language: string;
+      condition: string;
+      isFoil: boolean;
+      qty: unknown;
+    };
 
-    // map InventoryBalance per key
+    const invRows = await prisma.$queryRawUnsafe<LotAgg[]>(
+      `
+      SELECT
+        "cardmarketId",
+        UPPER(COALESCE("language",'EN')) AS "language",
+        UPPER(COALESCE("condition",'NM')) AS "condition",
+        COALESCE("isFoil", false) AS "isFoil",
+        COALESCE(SUM("qtyRemaining"),0) AS qty
+      FROM "InventoryLot"
+      WHERE "qtyRemaining" > 0
+        AND "location" IS NOT NULL
+        AND "location" NOT LIKE 'CB-%'
+      GROUP BY 1,2,3,4
+      `
+    );
+
     const invMap = new Map<string, InvRow>();
 
-    for (const b of balances) {
-      const language = (b.language || "").toUpperCase();
-      const condition = (b.condition || "").toUpperCase();
+    for (const b of invRows) {
+      const language = (b.language || "EN").toUpperCase();
+      const condition = normalizeInvCondition(b.condition);
       const isFoil = Boolean(b.isFoil);
+      const qtyOnHand = Number(b.qty || 0);
 
       const key = buildKey(b.cardmarketId, language, condition, isFoil);
 
       invMap.set(key, {
         cardmarketId: b.cardmarketId,
-        name: null,       // naam/setcode kennen we hier niet → komt uit CM
+        name: null,
         setCode: null,
         language,
         condition,
         isFoil,
-        qtyOnHand: b.qtyOnHand,
-        
+        qtyOnHand,
       });
+
+      cmCardmarketIds.add(b.cardmarketId);
+    }
+
+    // tix map (direct lookup, then fallback)
+    const allCmIds = Array.from(cmCardmarketIds);
+    const tixMap = new Map<number, number>();
+
+    if (allCmIds.length) {
+      const lookupRows = await prisma.$queryRawUnsafe<LookupRow[]>(
+        `SELECT "cardmarketId","scryfallId","oracleId","tix" FROM "ScryfallLookup" WHERE "cardmarketId" = ANY($1)`,
+        allCmIds
+      );
+
+      const missingScryfallIds = new Set<string>();
+      const missingOracleIds = new Set<string>();
+      const lookupByCardmarketId = new Map<number, LookupRow>();
+
+      for (const row of lookupRows) {
+        lookupByCardmarketId.set(Number(row.cardmarketId), row);
+
+        if (row.tix != null && Number(row.tix) > 0) {
+          tixMap.set(Number(row.cardmarketId), Number(row.tix));
+        } else {
+          if (row.scryfallId) missingScryfallIds.add(row.scryfallId);
+          if (row.oracleId) missingOracleIds.add(row.oracleId);
+        }
+      }
+
+      if (missingScryfallIds.size || missingOracleIds.size) {
+        const sfIds = Array.from(missingScryfallIds);
+        const orIds = Array.from(missingOracleIds);
+
+        let fallbackRows: FallbackRow[] = [];
+
+        if (sfIds.length && orIds.length) {
+          fallbackRows = await prisma.$queryRawUnsafe<FallbackRow[]>(
+            `
+            SELECT "scryfallId","oracleId","tix"
+            FROM "ScryfallTixFallback"
+            WHERE "scryfallId" = ANY($1)
+               OR "oracleId" = ANY($2)
+            `,
+            sfIds,
+            orIds
+          );
+        } else if (sfIds.length) {
+          fallbackRows = await prisma.$queryRawUnsafe<FallbackRow[]>(
+            `
+            SELECT "scryfallId","oracleId","tix"
+            FROM "ScryfallTixFallback"
+            WHERE "scryfallId" = ANY($1)
+            `,
+            sfIds
+          );
+        } else if (orIds.length) {
+          fallbackRows = await prisma.$queryRawUnsafe<FallbackRow[]>(
+            `
+            SELECT "scryfallId","oracleId","tix"
+            FROM "ScryfallTixFallback"
+            WHERE "oracleId" = ANY($1)
+            `,
+            orIds
+          );
+        }
+
+        const fallbackByScryfallId = new Map<string, number>();
+        const fallbackByOracleId = new Map<string, number>();
+
+        for (const row of fallbackRows) {
+          const tix = row.tix != null ? Number(row.tix) : null;
+          if (!(tix != null && tix > 0)) continue;
+
+          if (row.scryfallId && !fallbackByScryfallId.has(row.scryfallId)) {
+            fallbackByScryfallId.set(row.scryfallId, tix);
+          }
+          if (row.oracleId && !fallbackByOracleId.has(row.oracleId)) {
+            fallbackByOracleId.set(row.oracleId, tix);
+          }
+        }
+
+        for (const [cardmarketId, row] of lookupByCardmarketId.entries()) {
+          if (tixMap.has(cardmarketId)) continue;
+
+          const fallbackTix =
+            (row.scryfallId ? fallbackByScryfallId.get(row.scryfallId) : undefined) ??
+            (row.oracleId ? fallbackByOracleId.get(row.oracleId) : undefined);
+
+          if (fallbackTix != null && fallbackTix > 0) {
+            tixMap.set(cardmarketId, fallbackTix);
+          }
+        }
+      }
     }
 
     // union van alle keys
@@ -353,8 +495,8 @@ const balances = await prisma.inventoryBalance.findMany({
       const name = cm?.name ?? inv?.name ?? null;
       const setCode = cm?.setCode ?? inv?.setCode ?? null;
 
-      // desiredOnline alleen via policy
-     const desiredOnline = onHand;
+      const tix = tixMap.get(cardmarketId) ?? null;
+      const desiredOnline = computeDesiredOnline(onHand, tiers, isFoil, tix);
 
       const deltaPolicy = cmQty - desiredOnline;
       const deltaStock = cmQty - onHand;
@@ -376,13 +518,17 @@ const balances = await prisma.inventoryBalance.findMany({
     }
 
     // --- classificatie ---
-    // oversell-risico: meer op CM dan op voorraad
-    const tooMuch = auditRows.filter((r) => r.cmQty > r.onHand);
-    // onderlisted: minder op CM dan op voorraad (maar wel voorraad)
-    const tooLittle = auditRows.filter(
-      (r) => r.onHand > 0 && r.cmQty < r.onHand
+    // meer op CM dan wenselijk volgens policy of fysiek veilig
+    const tooMuch = auditRows.filter(
+      (r) => r.cmQty > Math.max(0, Math.min(r.onHand, r.desiredOnline))
     );
-    // alle qty-verschillen
+
+    // minder op CM dan gewenst volgens policy, terwijl er voorraad is
+    const tooLittle = auditRows.filter(
+      (r) => r.onHand > 0 && r.cmQty < Math.max(0, Math.min(r.onHand, r.desiredOnline))
+    );
+
+    // puur live CM vs fysieke CM-eligible voorraad
     const stockMismatch = auditRows.filter((r) => r.deltaStock !== 0);
 
     const header = [

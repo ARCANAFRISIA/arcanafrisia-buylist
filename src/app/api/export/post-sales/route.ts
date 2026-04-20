@@ -1,4 +1,3 @@
-// src/app/api/export/post-sales/route.ts
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 
@@ -55,21 +54,9 @@ function conditionToCtBucket(cond: string | null | undefined): string {
   return "NM";
 }
 
-function buildComment(channel: string, location: string | null, sourceCode: string | null) {
+function buildComment(location: string | null, sourceCode: string | null) {
   const src = (sourceCode ?? "").trim();
-  const ch = (channel || "CM").toUpperCase();
-
-  if (ch === "CTBULK") {
-    return src;
-  }
-
   return `Tracked letter NL 4,- EU 5,- | Free shipping on orders over 75,- | ${src}`.trim();
-}
-
-function normalizeChannel(raw: string) {
-  const ch = (raw || "CM").toUpperCase();
-  if (ch === "CT") return "CTBULK";
-  return ch;
 }
 
 function normalizeMode(raw: string) {
@@ -78,11 +65,57 @@ function normalizeMode(raw: string) {
   return "relist";
 }
 
-function cursorKeyFor(channel: string, mode: string) {
-  const ch = channel.toUpperCase();
+function cursorKeyFor(mode: string) {
   const m = mode.toLowerCase();
-  if (ch === "CTBULK") return `ctbulk.${m}.lastExportAt`;
   return `cm.${m}.lastExportAt`;
+}
+
+function getMarketFloorPrice(cmTrend: number | null, ctMin: number | null) {
+  const hasCt = ctMin != null && Number.isFinite(ctMin) && ctMin > 0;
+  const hasCm = cmTrend != null && Number.isFinite(cmTrend) && cmTrend > 0;
+
+  if (hasCt && hasCm) return Math.max(ctMin as number, (cmTrend as number) * 1.1);
+  if (hasCt) return ctMin as number;
+  if (hasCm) return (cmTrend as number) * 1.1;
+  return null;
+}
+
+type PolicyTier = {
+  minOnHand: number;
+  listQty: number;
+};
+
+type PolicyWithTiers = {
+  id: number;
+  name: string;
+  channel: string;
+  priceSource: string;
+  roundingStepEur: unknown;
+  enabled: boolean;
+  tiers: PolicyTier[];
+};
+
+function getBaseCap(policy: PolicyWithTiers, qty: number) {
+  const tier = policy.tiers.find((t) => qty >= t.minOnHand) || null;
+  return tier?.listQty ?? 0;
+}
+
+function applyPlaysetPremium(params: {
+  baseCap: number;
+  qty: number;
+  isFoil: boolean;
+  tix: number | null | undefined;
+}) {
+  const { baseCap, qty, isFoil, tix } = params;
+  if (isFoil) return baseCap;
+  if (qty < 4) return baseCap;
+  if (tix == null || !(tix > 3)) return baseCap;
+  return Math.max(baseCap, 4);
+}
+
+function getFinalCap(policy: PolicyWithTiers, qty: number, isFoil: boolean, tix: number | null | undefined) {
+  const baseCap = getBaseCap(policy, qty);
+  return applyPlaysetPremium({ baseCap, qty, isFoil, tix });
 }
 
 type Bal = {
@@ -93,28 +126,28 @@ type Bal = {
   qtyOnHand: number;
 };
 
-type LotAggRow = {
+type LookupRow = {
   cardmarketId: number;
-  isFoil: boolean;
-  condition: string;
-  language: string;
-  sourceCode: string;
-  location: string;
-  qty: any;
+  scryfallId: string | null;
+  oracleId: string | null;
+  tix: number | null;
+};
+
+type FallbackRow = {
+  scryfallId: string;
+  oracleId: string | null;
+  tix: number | null;
 };
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
 
-  const channel = normalizeChannel(url.searchParams.get("channel") || "CM");
   const mode = normalizeMode(url.searchParams.get("mode") || "relist");
   const markupPct = Number(url.searchParams.get("markupPct") || "0.05");
-
   const noCursor = url.searchParams.get("noCursor") === "1";
   const sinceParam = url.searchParams.get("since");
-  const physical = url.searchParams.get("physical") === "1";
 
-  const cursorKey = cursorKeyFor(channel, mode);
+  const cursorKey = cursorKeyFor(mode);
   const cursor = await prisma.syncCursor.findUnique({ where: { key: cursorKey } });
 
   const effectiveSince =
@@ -140,26 +173,35 @@ export async function GET(req: NextRequest) {
     new Set(balances.map((b) => Number(b.cardmarketId)).filter(Number.isFinite))
   ) as number[];
 
+  const header =
+    "cardmarketId,isFoil,condition,language,addQty,priceEur,policyName,sourceCode,location,comment\n";
+
   if (!cmIds.length) {
-    return new Response(
-      "cardmarketId,isFoil,condition,language,addQty,priceEur,policyName,sourceCode,stockClass,location,comment\n",
-      {
-        headers: {
-          "Content-Type": "text/csv; charset=utf-8",
-          "Content-Disposition": `attachment; filename="post-sales-${channel}-${Date.now()}.csv"`,
-        },
-      }
-    );
+    return new Response(header, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="post-sales-cm-${Date.now()}.csv"`,
+      },
+    });
   }
 
-  const header =
-    "cardmarketId,isFoil,condition,language,addQty,priceEur,policyName,sourceCode,stockClass,location,comment\n";
+  const policyRaw = await prisma.listPolicy.findFirst({
+    where: { channel: "CM", enabled: true },
+    include: { tiers: { orderBy: { minOnHand: "desc" } } },
+  });
+
+  if (!policyRaw) {
+    return new Response("No enabled ListPolicy for CM channel", { status: 400 });
+  }
+
+  const policy = policyRaw as unknown as PolicyWithTiers;
+
   const lines: string[] = [header];
 
   // ---- soldMap in bulk (used for relist) ----
   const soldMap = new Map<string, number>();
   if (mode === "relist") {
-    type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: any };
+    type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: unknown };
     const rows = await prisma.$queryRawUnsafe<Row[]>(
       `
       SELECT
@@ -173,7 +215,7 @@ export async function GET(req: NextRequest) {
         AND ts >= $1
       GROUP BY 1,2,3,4
       `,
-      effectiveSince as any
+      effectiveSince as unknown
     );
 
     for (const r of rows) {
@@ -185,7 +227,7 @@ export async function GET(req: NextRequest) {
   // ---- CM eligible qty map (all non-CB locations) ----
   const cmQtyMap = new Map<string, number>();
   {
-    type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: any };
+    type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: unknown };
     const rows = await prisma.$queryRawUnsafe<Row[]>(
       `
       SELECT
@@ -210,38 +252,10 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ---- CT eligible qty map (only CB- locations) ----
-  const ctQtyMap = new Map<string, number>();
-  {
-    type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: any };
-    const rows = await prisma.$queryRawUnsafe<Row[]>(
-      `
-      SELECT
-        "cardmarketId",
-        COALESCE("isFoil", false) AS "isFoil",
-        ${normCondSql(`"condition"`)} AS "condition",
-        ${normLangSql(`"language"`)} AS "language",
-        COALESCE(SUM("qtyRemaining"),0) AS sum
-      FROM "InventoryLot"
-      WHERE "cardmarketId" = ANY($1)
-        AND "qtyRemaining" > 0
-        AND "location" IS NOT NULL
-        AND "location" LIKE 'CB-%'
-      GROUP BY 1,2,3,4
-      `,
-      cmIds
-    );
-
-    for (const r of rows) {
-      const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}|${r.language}`;
-      ctQtyMap.set(key, Math.abs(Number(r.sum || 0)));
-    }
-  }
-
   // ---- newStockMap CM (all non-CB locations) ----
-  const newStockMapCM = new Map<string, number>();
+  const newStockMap = new Map<string, number>();
   if (mode === "newstock") {
-    type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: any };
+    type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: unknown };
     const rows = await prisma.$queryRawUnsafe<Row[]>(
       `
       SELECT
@@ -257,47 +271,19 @@ export async function GET(req: NextRequest) {
         AND "location" NOT LIKE 'CB-%'
       GROUP BY 1,2,3,4
       `,
-      effectiveSince as any
+      effectiveSince as unknown
     );
 
     for (const r of rows) {
       const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}|${r.language}`;
-      newStockMapCM.set(key, Math.abs(Number(r.sum || 0)));
-    }
-  }
-
-  // ---- newStockMap CT ----
-  const newStockMapCT = new Map<string, number>();
-  if (mode === "newstock") {
-    type Row = { cardmarketId: number; isFoil: boolean; condition: string; language: string; sum: any };
-    const rows = await prisma.$queryRawUnsafe<Row[]>(
-      `
-      SELECT
-        "cardmarketId",
-        COALESCE("isFoil", false) AS "isFoil",
-        ${normCondSql(`"condition"`)} AS "condition",
-        ${normLangSql(`"language"`)} AS "language",
-        COALESCE(SUM("qtyRemaining"),0) AS sum
-      FROM "InventoryLot"
-      WHERE "sourceDate" >= $1
-        AND "qtyRemaining" > 0
-        AND "location" IS NOT NULL
-        AND "location" LIKE 'CB-%'
-      GROUP BY 1,2,3,4
-      `,
-      effectiveSince as any
-    );
-
-    for (const r of rows) {
-      const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}|${r.language}`;
-      newStockMapCT.set(key, Math.abs(Number(r.sum || 0)));
+      newStockMap.set(key, Math.abs(Number(r.sum || 0)));
     }
   }
 
   // ---- cmTrendMap ----
   const cmTrendMap = new Map<number, number>();
   {
-    const rows = await prisma.$queryRawUnsafe<{ cardmarketId: number; trend: any | null }[]>(
+    const rows = await prisma.$queryRawUnsafe<{ cardmarketId: number; trend: unknown | null }[]>(
       `SELECT "cardmarketId","trend" FROM "CMPriceGuide" WHERE "cardmarketId" = ANY($1)`,
       cmIds
     );
@@ -306,7 +292,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ---- Blueprint / CT min maps ----
+  // ---- Blueprint / CT min maps (pricing only) ----
   const mapRows = await prisma.$queryRawUnsafe<{ cardmarketId: number; blueprintId: number | null }[]>(
     `SELECT "cardmarketId","blueprintId" FROM "BlueprintMapping" WHERE "cardmarketId" = ANY($1)`,
     cmIds
@@ -408,8 +394,8 @@ export async function GET(req: NextRequest) {
       ORDER BY
         "cardmarketId",
         COALESCE("isFoil",false),
-        ${normCondSql(`"condition"`)} ,
-        ${normLangSql(`"language"`)} ,
+        ${normCondSql(`"condition"`)},
+        ${normLangSql(`"language"`)},
         "sourceDate" ASC,
         "createdAt" ASC
       `,
@@ -419,49 +405,6 @@ export async function GET(req: NextRequest) {
     for (const r of rows) {
       const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}|${r.language}`;
       firstCmLotMap.set(key, { sourceCode: r.sourceCode ?? null, location: r.location ?? null });
-    }
-  }
-
-  // ---- first CT meta map (only CB locations) ----
-  const firstCtLotMap = new Map<string, { sourceCode: string | null; location: string | null }>();
-  {
-    type Row = {
-      cardmarketId: number;
-      isFoil: boolean;
-      condition: string;
-      language: string;
-      sourceCode: string | null;
-      location: string | null;
-    };
-
-    const rows = await prisma.$queryRawUnsafe<Row[]>(
-      `
-      SELECT DISTINCT ON ("cardmarketId", COALESCE("isFoil",false), ${normCondSql(`"condition"`)}, ${normLangSql(`"language"`)} )
-        "cardmarketId",
-        COALESCE("isFoil", false) AS "isFoil",
-        ${normCondSql(`"condition"`)} AS "condition",
-        ${normLangSql(`"language"`)} AS "language",
-        "sourceCode",
-        "location"
-      FROM "InventoryLot"
-      WHERE "cardmarketId" = ANY($1)
-        AND "qtyRemaining" > 0
-        AND "location" IS NOT NULL
-        AND "location" LIKE 'CB-%'
-      ORDER BY
-        "cardmarketId",
-        COALESCE("isFoil",false),
-        ${normCondSql(`"condition"`)} ,
-        ${normLangSql(`"language"`)} ,
-        "sourceDate" ASC,
-        "createdAt" ASC
-      `,
-      cmIds
-    );
-
-    for (const r of rows) {
-      const key = `${r.cardmarketId}|${r.isFoil ? 1 : 0}|${r.condition}|${r.language}`;
-      firstCtLotMap.set(key, { sourceCode: r.sourceCode ?? null, location: r.location ?? null });
     }
   }
 
@@ -494,11 +437,11 @@ export async function GET(req: NextRequest) {
       ORDER BY
         "cardmarketId",
         COALESCE("isFoil",false),
-        ${normCondSql(`"condition"`)} ,
-        ${normLangSql(`"language"`)} ,
+        ${normCondSql(`"condition"`)},
+        ${normLangSql(`"language"`)},
         ts DESC
       `,
-      effectiveSince as any
+      effectiveSince as unknown
     );
 
     for (const r of rows) {
@@ -515,217 +458,96 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ---- policy (CM only) ----
-  const needsPolicy = channel === "CM";
-  const policy = needsPolicy
-    ? await prisma.listPolicy.findFirst({
-        where: { channel: "CM", enabled: true },
-        include: { tiers: { orderBy: { minOnHand: "desc" } } },
-      })
-    : null;
-
-  if (needsPolicy && !policy) {
-    return new Response("No enabled ListPolicy for CM channel", { status: 400 });
-  }
-
-  // ---- CTBULK lot-based rows (only CB locations) ----
-  let ctbulkRows: LotAggRow[] = [];
-  if (channel === "CTBULK") {
-    const whereSince = mode === "newstock" ? `AND "sourceDate" >= $1` : ``;
-    const params: any[] = mode === "newstock" ? [effectiveSince] : [];
-
-    ctbulkRows = await prisma.$queryRawUnsafe<LotAggRow[]>(
-      `
-      SELECT
-        "cardmarketId",
-        COALESCE("isFoil", false) AS "isFoil",
-        ${normCondSql(`"condition"`)} AS "condition",
-        ${normLangSql(`"language"`)} AS "language",
-        "sourceCode",
-        "location",
-        COALESCE(SUM("qtyRemaining"),0) AS qty
-      FROM "InventoryLot"
-      WHERE "qtyRemaining" > 0
-        AND "location" IS NOT NULL
-        AND "sourceCode" IS NOT NULL
-        AND "location" LIKE 'CB-%'
-        ${whereSince}
-      GROUP BY 1,2,3,4,5,6
-      HAVING COALESCE(SUM("qtyRemaining"),0) > 0
-      ORDER BY "cardmarketId","isFoil","condition","language","location","sourceCode"
-      `,
-      ...params
+  // ---- tix map (direct lookup, then fallback) ----
+  const tixMap = new Map<number, number>();
+  {
+    const lookupRows = await prisma.$queryRawUnsafe<LookupRow[]>(
+      `SELECT "cardmarketId","scryfallId","oracleId","tix" FROM "ScryfallLookup" WHERE "cardmarketId" = ANY($1)`,
+      cmIds
     );
-  }
 
-  // ---- CM physical lot-based rows (all non-CB locations) ----
-  let cmPhysicalRows: LotAggRow[] = [];
-  if (channel === "CM" && mode === "full" && physical) {
-    cmPhysicalRows = await prisma.$queryRawUnsafe<LotAggRow[]>(
-      `
-      SELECT
-        "cardmarketId",
-        COALESCE("isFoil", false) AS "isFoil",
-        ${normCondSql(`"condition"`)} AS "condition",
-        ${normLangSql(`"language"`)} AS "language",
-        "sourceCode",
-        "location",
-        COALESCE(SUM("qtyRemaining"),0) AS qty
-      FROM "InventoryLot"
-      WHERE "qtyRemaining" > 0
-        AND "location" IS NOT NULL
-        AND "sourceCode" IS NOT NULL
-        AND "location" NOT LIKE 'CB-%'
-      GROUP BY 1,2,3,4,5,6
-      HAVING COALESCE(SUM("qtyRemaining"),0) > 0
-      ORDER BY "cardmarketId","isFoil","condition","language","location","sourceCode"
-      `
-    );
-  }
+    const missingScryfallIds = new Set<string>();
+    const missingOracleIds = new Set<string>();
+    const lookupByCardmarketId = new Map<number, LookupRow>();
 
-  // ---- CTBULK early return ----
-  if (channel === "CTBULK") {
-    for (const r of ctbulkRows) {
-      const addQty = Number(r.qty || 0);
-      if (!(addQty > 0)) continue;
+    for (const row of lookupRows) {
+      lookupByCardmarketId.set(Number(row.cardmarketId), row);
 
-      const cmid = Number(r.cardmarketId);
-      const cond = (r.condition || "NM").toUpperCase();
-      const lang = (r.language || "EN").toUpperCase();
-
-      let price: number | null = null;
-
-      const cmTrend = cmTrendMap.get(cmid) ?? null;
-
-      const bucket = conditionToCtBucket(cond);
-      const ctKey = `${cmid}|${r.isFoil ? 1 : 0}|${bucket}`;
-      const ctMinByBucket = ctMinByCond.get(ctKey) ?? null;
-
-      const ctMinGlobal = ctMinMap.get(cmid) ?? null;
-      const ctMin = ctMinByBucket ?? ctMinGlobal;
-
-      if (cmTrend != null || ctMin != null) {
-        const base = Math.max(ctMin ?? 0, (cmTrend ?? 0) * 1.10);
-        price = base;
+      if (row.tix != null && Number(row.tix) > 0) {
+        tixMap.set(Number(row.cardmarketId), Number(row.tix));
       } else {
-        price = 1000;
+        if (row.scryfallId) missingScryfallIds.add(row.scryfallId);
+        if (row.oracleId) missingOracleIds.add(row.oracleId);
+      }
+    }
+
+    if (missingScryfallIds.size || missingOracleIds.size) {
+      const sfIds = Array.from(missingScryfallIds);
+      const orIds = Array.from(missingOracleIds);
+
+      let fallbackRows: FallbackRow[] = [];
+
+      if (sfIds.length && orIds.length) {
+        fallbackRows = await prisma.$queryRawUnsafe<FallbackRow[]>(
+          `
+          SELECT "scryfallId","oracleId","tix"
+          FROM "ScryfallTixFallback"
+          WHERE "scryfallId" = ANY($1)
+             OR "oracleId" = ANY($2)
+          `,
+          sfIds,
+          orIds
+        );
+      } else if (sfIds.length) {
+        fallbackRows = await prisma.$queryRawUnsafe<FallbackRow[]>(
+          `
+          SELECT "scryfallId","oracleId","tix"
+          FROM "ScryfallTixFallback"
+          WHERE "scryfallId" = ANY($1)
+          `,
+          sfIds
+        );
+      } else if (orIds.length) {
+        fallbackRows = await prisma.$queryRawUnsafe<FallbackRow[]>(
+          `
+          SELECT "scryfallId","oracleId","tix"
+          FROM "ScryfallTixFallback"
+          WHERE "oracleId" = ANY($1)
+          `,
+          orIds
+        );
       }
 
-      const step = 0.05;
-      if (price != null && price > 0) price = roundStep(price, step);
-      if (price == null || !(price > 0)) continue;
+      const fallbackByScryfallId = new Map<string, number>();
+      const fallbackByOracleId = new Map<string, number>();
 
-      const sourceCode = (r.sourceCode ?? "").trim();
-      const location = (r.location ?? "").trim();
-      if (!sourceCode || !location) continue;
+      for (const row of fallbackRows) {
+        const tix = row.tix != null ? Number(row.tix) : null;
+        if (!(tix != null && tix > 0)) continue;
 
-      const comment = buildComment("CTBULK", location, sourceCode);
-
-      lines.push(
-        [
-          csvEscape(cmid),
-          csvEscape(!!r.isFoil),
-          csvEscape(cond),
-          csvEscape(lang),
-          csvEscape(addQty),
-          csvEscape(price.toFixed(2)),
-          csvEscape("CTBULK"),
-          csvEscape(sourceCode),
-          csvEscape("CTBULK"),
-          csvEscape(location),
-          csvEscape(comment),
-        ].join(",") + "\n"
-      );
-    }
-
-    if (!noCursor) {
-      await prisma.syncCursor.upsert({
-        where: { key: cursorKey },
-        update: { value: new Date().toISOString(), updatedAt: new Date() },
-        create: { key: cursorKey, value: new Date().toISOString(), updatedAt: new Date() },
-      });
-    }
-
-    return new Response(lines.join(""), {
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="post-sales-${channel}-${Date.now()}.csv"`,
-      },
-    });
-  }
-
-  // ---- CM physical early return ----
-  if (channel === "CM" && mode === "full" && physical) {
-    for (const r of cmPhysicalRows) {
-      const addQty = Number(r.qty || 0);
-      if (!(addQty > 0)) continue;
-
-      const cmid = Number(r.cardmarketId);
-      const cond = (r.condition || "NM").toUpperCase();
-      const lang = (r.language || "EN").toUpperCase();
-
-      let price: number | null = null;
-
-      const cmTrend = cmTrendMap.get(cmid) ?? null;
-
-      const bucket = conditionToCtBucket(cond);
-      const ctKey = `${cmid}|${r.isFoil ? 1 : 0}|${bucket}`;
-      const ctMinByBucket = ctMinByCond.get(ctKey) ?? null;
-
-      const ctMinGlobal = ctMinMap.get(cmid) ?? null;
-      const ctMin = ctMinByBucket ?? ctMinGlobal;
-
-      if (cmTrend != null || ctMin != null) {
-        const base = Math.max(ctMin ?? 0, (cmTrend ?? 0) * 1.10);
-        price = base;
-      } else {
-        price = 1000;
+        if (row.scryfallId && !fallbackByScryfallId.has(row.scryfallId)) {
+          fallbackByScryfallId.set(row.scryfallId, tix);
+        }
+        if (row.oracleId && !fallbackByOracleId.has(row.oracleId)) {
+          fallbackByOracleId.set(row.oracleId, tix);
+        }
       }
 
-      const step = Number(policy?.roundingStepEur ?? 0.05) || 0.05;
-      if (price != null && price > 0) price = roundStep(price, step);
-      if (price == null || !(price > 0)) continue;
+      for (const [cardmarketId, row] of lookupByCardmarketId.entries()) {
+        if (tixMap.has(cardmarketId)) continue;
 
-      const sourceCode = (r.sourceCode ?? "").trim();
-      const location = (r.location ?? "").trim();
-      if (!sourceCode || !location) continue;
+        const fallbackTix =
+          (row.scryfallId ? fallbackByScryfallId.get(row.scryfallId) : undefined) ??
+          (row.oracleId ? fallbackByOracleId.get(row.oracleId) : undefined);
 
-      const comment = buildComment("CM", location, sourceCode);
-
-      lines.push(
-        [
-          csvEscape(cmid),
-          csvEscape(!!r.isFoil),
-          csvEscape(cond),
-          csvEscape(lang),
-          csvEscape(addQty),
-          csvEscape(price.toFixed(2)),
-          csvEscape(policy?.name ?? "CM"),
-          csvEscape(sourceCode),
-          csvEscape("REGULAR"),
-          csvEscape(location),
-          csvEscape(comment),
-        ].join(",") + "\n"
-      );
+        if (fallbackTix != null && fallbackTix > 0) {
+          tixMap.set(cardmarketId, fallbackTix);
+        }
+      }
     }
-
-    if (!noCursor) {
-      await prisma.syncCursor.upsert({
-        where: { key: cursorKey },
-        update: { value: new Date().toISOString(), updatedAt: new Date() },
-        create: { key: cursorKey, value: new Date().toISOString(), updatedAt: new Date() },
-      });
-    }
-
-    return new Response(lines.join(""), {
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="post-sales-${channel}-full-physical-${Date.now()}.csv"`,
-      },
-    });
   }
 
-  // ---- broad CM flow / CT flow ----
+  // ---- CM flow only ----
   for (const b of balances) {
     if (b.qtyOnHand <= 0) continue;
 
@@ -734,63 +556,45 @@ export async function GET(req: NextRequest) {
     const key = `${b.cardmarketId}|${b.isFoil ? 1 : 0}|${cond}|${lang}`;
 
     const cmEligibleQty = cmQtyMap.get(key) ?? 0;
-    const ctEligibleQty = ctQtyMap.get(key) ?? 0;
-
-    if (channel === "CM") {
-      if (cmEligibleQty <= 0) continue;
-    } else if (channel === "CTBULK") {
-      if (ctEligibleQty <= 0) continue;
-    }
+    if (cmEligibleQty <= 0) continue;
 
     const soldSince = soldMap.get(key) || 0;
-    const newSince = channel === "CM" ? (newStockMapCM.get(key) || 0) : (newStockMapCT.get(key) || 0);
+    const newSince = newStockMap.get(key) || 0;
+    const tix = tixMap.get(Number(b.cardmarketId)) ?? null;
 
     let addQty = 0;
 
-    if (channel === "CTBULK") {
-      if (mode === "full") {
-        addQty = Math.max(0, ctEligibleQty);
-      } else if (mode === "newstock") {
-        if (newSince <= 0) continue;
-        addQty = Math.min(newSince, ctEligibleQty);
-      } else {
-        if (soldSince <= 0) continue;
-        addQty = Math.min(soldSince, ctEligibleQty);
-      }
+    if (mode === "full") {
+      const capNow = getFinalCap(policy, cmEligibleQty, b.isFoil, tix);
+      addQty = Math.max(0, Math.min(capNow, cmEligibleQty));
+      if (addQty <= 0) continue;
+    } else if (mode === "relist") {
+      if (soldSince <= 0) continue;
+
+      const capNow = getFinalCap(policy, cmEligibleQty, b.isFoil, tix);
+      addQty = Math.max(0, Math.min(soldSince, capNow, cmEligibleQty));
     } else {
-      if (!policy) continue;
+      if (newSince <= 0) continue;
 
-      if (mode === "full") {
-        const tierNow = policy.tiers.find((t) => cmEligibleQty >= t.minOnHand) || null;
-        const capNow = tierNow?.listQty ?? 0;
-        addQty = Math.max(0, Math.min(capNow, cmEligibleQty));
-        if (addQty <= 0) continue;
-      } else if (mode === "relist") {
-        if (soldSince <= 0) continue;
+      const capNow = getFinalCap(policy, cmEligibleQty, b.isFoil, tix);
+      const oldOnHand = Math.max(0, cmEligibleQty - newSince);
+      const capOld = getFinalCap(policy, oldOnHand, b.isFoil, tix);
 
-        const tierNow = policy.tiers.find((t) => cmEligibleQty >= t.minOnHand) || null;
-        const capNow = tierNow?.listQty ?? 0;
+      const desiredNow = Math.min(capNow, cmEligibleQty);
+      const desiredOld = Math.min(capOld, oldOnHand);
 
-        addQty = Math.max(0, Math.min(soldSince, capNow, cmEligibleQty));
-      } else {
-        if (newSince <= 0) continue;
-
-        const tierNow = policy.tiers.find((t) => cmEligibleQty >= t.minOnHand) || null;
-        const capNow = tierNow?.listQty ?? 0;
-
-        const oldOnHand = Math.max(0, cmEligibleQty - newSince);
-        const tierOld = policy.tiers.find((t) => oldOnHand >= t.minOnHand) || null;
-        const capOld = tierOld?.listQty ?? 0;
-
-        const desiredNow = Math.min(capNow, cmEligibleQty);
-        const desiredOld = Math.min(capOld, oldOnHand);
-
-        const extraNeeded = Math.max(0, desiredNow - desiredOld);
-        addQty = Math.max(0, Math.min(extraNeeded, newSince, cmEligibleQty));
-      }
+      const extraNeeded = Math.max(0, desiredNow - desiredOld);
+      addQty = Math.max(0, Math.min(extraNeeded, newSince, cmEligibleQty));
     }
 
     if (addQty <= 0) continue;
+
+    const cmTrend = cmTrendMap.get(Number(b.cardmarketId)) ?? null;
+    const bucket = conditionToCtBucket(cond);
+    const ctKey = `${b.cardmarketId}|${b.isFoil ? 1 : 0}|${bucket}`;
+    const ctMinByBucket = ctMinByCond.get(ctKey) ?? null;
+    const ctMinGlobal = ctMinMap.get(Number(b.cardmarketId)) ?? null;
+    const ctMin = ctMinByBucket ?? ctMinGlobal;
 
     let price: number | null = null;
 
@@ -798,56 +602,21 @@ export async function GET(req: NextRequest) {
       const last = lastSoldPriceMap.get(key) ?? null;
 
       if (last != null && last > 0) {
-        price = last * (1 + (isFinite(markupPct) ? markupPct : 0.05));
+        price = last * (1 + (Number.isFinite(markupPct) ? markupPct : 0.05));
       } else {
-        const cmTrend = cmTrendMap.get(b.cardmarketId) ?? null;
-
-        const bucket = conditionToCtBucket(cond);
-        const ctKey = `${b.cardmarketId}|${b.isFoil ? 1 : 0}|${bucket}`;
-        const ctMinByBucket = ctMinByCond.get(ctKey) ?? null;
-
-        const ctMinGlobal = ctMinMap.get(b.cardmarketId) ?? null;
-        const ctMin = ctMinByBucket ?? ctMinGlobal;
-
-        if (cmTrend != null || ctMin != null) {
-          const base = ctMin ?? (cmTrend ?? 0) * 1.10;
-          price = base;
-        }
+        price = getMarketFloorPrice(cmTrend, ctMin);
       }
     } else {
-      const cmTrend = cmTrendMap.get(b.cardmarketId) ?? null;
-
-      const bucket = conditionToCtBucket(cond);
-      const ctKey = `${b.cardmarketId}|${b.isFoil ? 1 : 0}|${bucket}`;
-      const ctMinByBucket = ctMinByCond.get(ctKey) ?? null;
-
-      const ctMinGlobal = ctMinMap.get(b.cardmarketId) ?? null;
-      const ctMin = ctMinByBucket ?? ctMinGlobal;
-
-      if (cmTrend != null || ctMin != null) {
-        const base = Math.max(ctMin ?? 0, (cmTrend ?? 0) * 1.10);
-        price = base;
-      } else {
-        price = 1000;
-      }
+      price = getMarketFloorPrice(cmTrend, ctMin);
     }
 
-    const step = Number(policy?.roundingStepEur ?? 0.05) || 0.05;
-    if (price != null && price > 0) price = roundStep(price, step);
     if (price == null || !(price > 0)) continue;
 
-    const meta =
-      channel === "CM"
-        ? (firstCmLotMap.get(key) ?? { sourceCode: null, location: null })
-        : (firstCtLotMap.get(key) ?? { sourceCode: null, location: null });
+    const step = Number(policy.roundingStepEur ?? 0.05) || 0.05;
+    price = roundStep(price, step);
 
-    if (channel === "CTBULK") {
-      if (!meta.location || !meta.sourceCode) continue;
-    }
-
-    const comment = buildComment(channel, meta.location, meta.sourceCode);
-    const policyName = channel === "CTBULK" ? "CTBULK" : (policy?.name ?? "");
-    const stockClass = channel === "CM" ? "REGULAR" : "CTBULK";
+    const meta = firstCmLotMap.get(key) ?? { sourceCode: null, location: null };
+    const comment = buildComment(meta.location, meta.sourceCode);
 
     lines.push(
       [
@@ -857,9 +626,8 @@ export async function GET(req: NextRequest) {
         csvEscape(lang),
         csvEscape(addQty),
         csvEscape(price.toFixed(2)),
-        csvEscape(policyName),
+        csvEscape(policy.name ?? "CM"),
         csvEscape(meta.sourceCode ?? ""),
-        csvEscape(stockClass),
         csvEscape(meta.location ?? ""),
         csvEscape(comment),
       ].join(",") + "\n"
@@ -877,7 +645,7 @@ export async function GET(req: NextRequest) {
   return new Response(lines.join(""), {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="post-sales-${channel}-${Date.now()}.csv"`,
+      "Content-Disposition": `attachment; filename="post-sales-cm-${Date.now()}.csv"`,
     },
   });
 }

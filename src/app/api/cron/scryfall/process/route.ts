@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const SCRYFALL_BASE = "https://api.scryfall.com/cards/cardmarket";
+const SCRYFALL_SEARCH = "https://api.scryfall.com/cards/search";
 
 type SFResp = {
   id: string;
@@ -18,10 +19,22 @@ type SFResp = {
   image_uris?: { small?: string; normal?: string };
   card_faces?: { image_uris?: { small?: string; normal?: string } }[];
   rarity?: string;
-  prices?: { usd?: string | null; eur?: string | null; tix?: string | null };
+  prices?: {
+    usd?: string | null;
+    eur?: string | null;
+    tix?: string | null;
+  };
   edhrec_rank?: number;
   legalities?: Record<string, string>;
   game_changer?: boolean;
+  released_at?: string;
+};
+
+type SFListResp = {
+  object: "list";
+  has_more?: boolean;
+  next_page?: string;
+  data: SFResp[];
 };
 
 type FetchOk = { ok: true; data: SFResp };
@@ -47,7 +60,7 @@ function extractImages(data: SFResp) {
 }
 
 function nextBackoffMs(attemptsSoFar: number): number {
-  // 5m, 10m, 20m, max 60m
+  // 5m, 10m, 20m, 40m, max 60m
   const minutes = Math.min(60, 5 * Math.pow(2, Math.max(0, attemptsSoFar)));
   return minutes * 60 * 1000;
 }
@@ -77,6 +90,138 @@ async function fetchOne(cardmarketId: number): Promise<FetchResult> {
   return { ok: true, data };
 }
 
+type OraclePriceFallback = {
+  eur: number | null;
+  tix: number | null;
+  usd: number | null;
+  fromSet: string | null;
+  fromScryfallId: string | null;
+};
+
+const oraclePriceCache = new Map<string, OraclePriceFallback | null>();
+
+function scorePrintForPriceFallback(card: SFResp): number {
+  let score = 0;
+
+  const eur = parsePrice(card.prices?.eur);
+  const tix = parsePrice(card.prices?.tix);
+  const usd = parsePrice(card.prices?.usd);
+
+  if (eur != null) score += 1000;
+  if (tix != null) score += 300;
+  if (usd != null) score += 100;
+
+  // echte paper/mtgo normale prints zijn vaak bruikbaarder dan rare variants,
+  // maar we houden het simpel en leunen vooral op prijs-aanwezigheid
+  if (card.set && !card.set.startsWith("p")) score += 10;
+  if (card.released_at) score += 1;
+
+  return score;
+}
+
+async function fetchOraclePriceFallback(
+  oracleId: string
+): Promise<OraclePriceFallback | null> {
+  if (oraclePriceCache.has(oracleId)) {
+    return oraclePriceCache.get(oracleId) ?? null;
+  }
+
+  const url =
+    `${SCRYFALL_SEARCH}?order=released` +
+    `&q=${encodeURIComponent(`oracleid:${oracleId}`)}` +
+    `&unique=prints`;
+
+  const res = await fetch(url, { cache: "no-store" });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Oracle fallback failed for ${oracleId}: HTTP ${res.status}${
+        text ? ` - ${text.slice(0, 300)}` : ""
+      }`
+    );
+  }
+
+  const json = (await res.json()) as SFListResp;
+  const prints = Array.isArray(json.data) ? json.data : [];
+
+  if (prints.length === 0) {
+    oraclePriceCache.set(oracleId, null);
+    return null;
+  }
+
+  const candidates = prints
+    .map((card) => ({
+      card,
+      eur: parsePrice(card.prices?.eur),
+      tix: parsePrice(card.prices?.tix),
+      usd: parsePrice(card.prices?.usd),
+      score: scorePrintForPriceFallback(card),
+    }))
+    .filter((x) => x.eur != null || x.tix != null || x.usd != null)
+    .sort((a, b) => b.score - a.score);
+
+  if (candidates.length === 0) {
+    oraclePriceCache.set(oracleId, null);
+    return null;
+  }
+
+  const best = candidates[0];
+  const picked: OraclePriceFallback = {
+    eur: best.eur,
+    tix: best.tix,
+    usd: best.usd,
+    fromSet: best.card.set ?? null,
+    fromScryfallId: best.card.id ?? null,
+  };
+
+  oraclePriceCache.set(oracleId, picked);
+  return picked;
+}
+
+async function enrichWithOraclePriceFallback(data: SFResp): Promise<SFResp> {
+  const hasDirectTix = parsePrice(data.prices?.tix) != null;
+  const hasDirectUsd = parsePrice(data.prices?.usd) != null;
+
+  // Voor EUR doen we GEEN oracle fallback:
+  // EUR moet print-specifiek blijven.
+  if (hasDirectTix && hasDirectUsd) {
+    return data;
+  }
+
+  if (!data.oracle_id) {
+    return data;
+  }
+
+  const fallback = await fetchOraclePriceFallback(data.oracle_id);
+  if (!fallback) {
+    return data;
+  }
+
+  return {
+    ...data,
+    prices: {
+      usd:
+        hasDirectUsd
+          ? data.prices?.usd ?? null
+          : fallback.usd != null
+          ? String(fallback.usd)
+          : null,
+
+      // BELANGRIJK:
+      // EUR blijft exact zoals de directe print hem teruggeeft
+      eur: data.prices?.eur ?? null,
+
+      tix:
+        hasDirectTix
+          ? data.prices?.tix ?? null
+          : fallback.tix != null
+          ? String(fallback.tix)
+          : null,
+    },
+  };
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const batch = Math.max(1, Number(url.searchParams.get("batch") ?? 120));
@@ -84,10 +229,6 @@ export async function GET(req: Request) {
 
   const now = new Date();
 
-  // Alleen actieve jobs:
-  // - niet notFound
-  // - nog binnen retry-limit
-  // - ready qua backoff
   const jobs = await prisma.scryfallLookupQueue.findMany({
     where: {
       notFound: false,
@@ -136,6 +277,7 @@ export async function GET(req: Request) {
       queueFailed,
       queueNotFound,
       totalLookup,
+      oraclePriceCacheSize: oraclePriceCache.size,
     });
   }
 
@@ -155,8 +297,6 @@ export async function GET(req: Request) {
 
           if (!r.ok) {
             if (r.code === 404) {
-              // Definitieve miss:
-              // bewaren in queue als notFound voor inzicht/debugging
               await prisma.scryfallLookupQueue.update({
                 where: { id: job.id },
                 data: {
@@ -170,7 +310,6 @@ export async function GET(req: Request) {
               return { del: false, jobId: job.id };
             }
 
-            // Tijdelijke fout: retry met backoff
             const nextTryAt = new Date(
               Date.now() + nextBackoffMs(job.attempts)
             );
@@ -191,56 +330,55 @@ export async function GET(req: Request) {
             return { del: false, jobId: job.id };
           }
 
-          const data = r.data;
-          const { imgSmall, imgNormal } = extractImages(data);
-          const rarity = data.rarity ?? null;
+          const enriched = await enrichWithOraclePriceFallback(r.data);
+          const { imgSmall, imgNormal } = extractImages(enriched);
+          const rarity = enriched.rarity ?? null;
 
           await prisma.scryfallLookup.upsert({
             where: { cardmarketId: job.cardmarketId },
             create: {
               cardmarketId: job.cardmarketId,
-              scryfallId: data.id,
-              oracleId: data.oracle_id ?? null,
-              name: data.name,
-              set: data.set,
-              collectorNumber: data.collector_number ?? null,
-              lang: data.lang ?? null,
+              scryfallId: enriched.id,
+              oracleId: enriched.oracle_id ?? null,
+              name: enriched.name,
+              set: enriched.set,
+              collectorNumber: enriched.collector_number ?? null,
+              lang: enriched.lang ?? null,
               imageSmall: imgSmall,
               imageNormal: imgNormal,
               rarity,
-              usd: parsePrice(data.prices?.usd),
-              eur: parsePrice(data.prices?.eur),
-              tix: parsePrice(data.prices?.tix),
-              edhrecRank: data.edhrec_rank ?? null,
-         legalities:
-  data.legalities != null
-    ? (data.legalities as Prisma.InputJsonValue)
-    : Prisma.DbNull,
-              gameChanger: data.game_changer ?? null,
+              usd: parsePrice(enriched.prices?.usd),
+              eur: parsePrice(enriched.prices?.eur),
+              tix: parsePrice(enriched.prices?.tix),
+              edhrecRank: enriched.edhrec_rank ?? null,
+              legalities:
+                enriched.legalities != null
+                  ? (enriched.legalities as Prisma.InputJsonValue)
+                  : Prisma.DbNull,
+              gameChanger: enriched.game_changer ?? null,
             },
             update: {
-              scryfallId: data.id,
-              oracleId: data.oracle_id ?? null,
-              name: data.name,
-              set: data.set,
-              collectorNumber: data.collector_number ?? null,
-              lang: data.lang ?? null,
+              scryfallId: enriched.id,
+              oracleId: enriched.oracle_id ?? null,
+              name: enriched.name,
+              set: enriched.set,
+              collectorNumber: enriched.collector_number ?? null,
+              lang: enriched.lang ?? null,
               imageSmall: imgSmall,
               imageNormal: imgNormal,
               rarity,
-              usd: parsePrice(data.prices?.usd),
-              eur: parsePrice(data.prices?.eur),
-              tix: parsePrice(data.prices?.tix),
-              edhrecRank: data.edhrec_rank ?? null,
-         legalities:
-  data.legalities != null
-    ? (data.legalities as Prisma.InputJsonValue)
-    : Prisma.DbNull,
-              gameChanger: data.game_changer ?? null,
+              usd: parsePrice(enriched.prices?.usd),
+              eur: parsePrice(enriched.prices?.eur),
+              tix: parsePrice(enriched.prices?.tix),
+              edhrecRank: enriched.edhrec_rank ?? null,
+              legalities:
+                enriched.legalities != null
+                  ? (enriched.legalities as Prisma.InputJsonValue)
+                  : Prisma.DbNull,
+              gameChanger: enriched.game_changer ?? null,
             },
           });
 
-          // Succes: job uit queue verwijderen
           return { del: true, jobId: job.id };
         } catch (e: any) {
           const nextTryAt = new Date(
@@ -269,7 +407,6 @@ export async function GET(req: Request) {
     await sleep(150);
   }
 
-  // Alleen successen uit queue halen
   if (toDelete.length) {
     await prisma.scryfallLookupQueue.deleteMany({
       where: { id: { in: toDelete } },
@@ -313,5 +450,6 @@ export async function GET(req: Request) {
     queueFailed,
     queueNotFound,
     totalLookup,
+    oraclePriceCacheSize: oraclePriceCache.size,
   });
 }

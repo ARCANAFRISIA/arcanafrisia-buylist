@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 type Row = {
   cardmarketId: string;
@@ -11,13 +11,67 @@ type Row = {
   price: string;
   policy: string;
   sourceCode: string;
-  stockClass?: string;
   location?: string;
   comment?: string;
 };
 
+function parseCsv(csv: string): string[][] {
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentField = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < csv.length; i++) {
+    const char = csv[i];
+    const nextChar = csv[i + 1];
+
+    if (inQuotes) {
+      if (char === '"' && nextChar === '"') {
+        currentField += '"';
+        i++;
+      } else if (char === '"') {
+        inQuotes = false;
+      } else {
+        currentField += char;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = true;
+      continue;
+    }
+
+    if (char === ",") {
+      currentRow.push(currentField);
+      currentField = "";
+      continue;
+    }
+
+    if (char === "\n") {
+      currentRow.push(currentField);
+      rows.push(currentRow);
+      currentRow = [];
+      currentField = "";
+      continue;
+    }
+
+    if (char === "\r") {
+      continue;
+    }
+
+    currentField += char;
+  }
+
+  if (currentField.length > 0 || currentRow.length > 0) {
+    currentRow.push(currentField);
+    rows.push(currentRow);
+  }
+
+  return rows;
+}
+
 export default function PostSalesPage() {
-  const [channel, setChannel] = useState<"CM" | "CT">("CM"); // CT = CTBULK
   const [mode, setMode] = useState<"relist" | "newstock" | "full">("relist");
   const [markupPct, setMarkupPct] = useState<string>("0.05");
   const [since, setSince] = useState<string>("");
@@ -26,11 +80,8 @@ export default function PostSalesPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const isCTBULK = channel === "CT";
-
   const buildUrl = (withNoCursor: boolean) => {
     const params = new URLSearchParams();
-    params.set("channel", channel);
     params.set("mode", mode);
     params.set("markupPct", markupPct || "0.05");
     if (since) params.set("since", since);
@@ -38,46 +89,33 @@ export default function PostSalesPage() {
     return `/api/export/post-sales?${params.toString()}`;
   };
 
-  // CM full physical export (lot-based, all non-CB stock)
-  const downloadCmFullPhysical = () => {
-    const params = new URLSearchParams();
-    params.set("channel", "CM");
-    params.set("mode", "full");
-    params.set("markupPct", markupPct || "0.05");
-    params.set("physical", "1");
-    window.location.href = `/api/export/post-sales?${params.toString()}`;
-  };
+  const parseRows = (csv: string): Row[] => {
+    const parsed = parseCsv(csv);
+    if (parsed.length <= 1) return [];
 
-  const parseCsv = (csv: string): Row[] => {
-    const lines = csv.trim().split("\n");
-    if (lines.length <= 1) return [];
-
-    return lines.slice(1).map((line) => {
-      const parts = line.split(",");
-      return {
-        cardmarketId: parts[0] ?? "",
-        foil: parts[1] ?? "",
-        cond: parts[2] ?? "",
-        language: parts[3] ?? "",
-        addQty: parts[4] ?? "",
-        price: parts[5] ?? "",
-        policy: parts[6] ?? "",
-        sourceCode: parts[7] ?? "",
-        stockClass: parts[8] ?? "",
-        location: parts[9] ?? "",
-        comment: parts[10] ?? "",
-      };
-    });
+    return parsed.slice(1).filter((parts) => parts.some((p) => p !== "")).map((parts) => ({
+      cardmarketId: parts[0] ?? "",
+      foil: parts[1] ?? "",
+      cond: parts[2] ?? "",
+      language: parts[3] ?? "",
+      addQty: parts[4] ?? "",
+      price: parts[5] ?? "",
+      policy: parts[6] ?? "",
+      sourceCode: parts[7] ?? "",
+      location: parts[8] ?? "",
+      comment: parts[9] ?? "",
+    }));
   };
 
   const handlePreview = async () => {
     setLoading(true);
     setError(null);
+
     try {
       const res = await fetch(buildUrl(noCursor), { method: "GET" });
       if (!res.ok) throw new Error(`Preview failed: ${res.status}`);
       const csv = await res.text();
-      setRows(parseCsv(csv));
+      setRows(parseRows(csv));
     } catch (e: any) {
       setError(e.message || "Preview failed");
       setRows([]);
@@ -91,31 +129,15 @@ export default function PostSalesPage() {
     window.location.href = url;
   };
 
-  const helperText = useMemo(() => {
-    if (!isCTBULK) {
-      return "CM exporteert weer breed uit alle niet-CB locaties. Newstock = recent geüpload, relist = recent verkocht, full = huidige CM-voorraad.";
-    }
-    return "CTBULK exporteert alleen voorraad uit CB-locaties.";
-  }, [isCTBULK]);
-
   return (
     <div className="p-6 space-y-6">
       <h1 className="text-2xl font-semibold">Post-Sales Export</h1>
-      <div className="text-sm opacity-80">{helperText}</div>
+      <div className="text-sm opacity-80">
+        CM export. Relist = recent verkocht, newstock = recent geüpload, full = huidige CM-voorraad.
+        Pricing gebruikt relist last sold + markup, anders CT min vs CM trend.
+      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
-        <div>
-          <label className="block text-sm mb-1">Channel</label>
-          <select
-            className="w-full rounded-md border px-3 py-2 bg-black/20"
-            value={channel}
-            onChange={(e) => setChannel(e.target.value as "CM" | "CT")}
-          >
-            <option value="CM">CM</option>
-            <option value="CT">CTBULK</option>
-          </select>
-        </div>
-
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
         <div>
           <label className="block text-sm mb-1">Mode</label>
           <select
@@ -148,7 +170,7 @@ export default function PostSalesPage() {
             onChange={(e) => setSince(e.target.value)}
             placeholder="2026-01-08T00:00:00Z"
           />
-          <div className="text-xs opacity-70 mt-1">Leeg = cursor (per channel+mode). Full negeert since.</div>
+          <div className="text-xs opacity-70 mt-1">Leeg = cursor per mode. Full negeert since.</div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -173,15 +195,9 @@ export default function PostSalesPage() {
         >
           {loading ? "Preview…" : "Preview"}
         </button>
+
         <button onClick={handleDownload} className="rounded-xl px-4 py-2 border hover:opacity-90">
           Download CSV
-        </button>
-
-        <button
-          onClick={downloadCmFullPhysical}
-          className="rounded-xl px-4 py-2 border hover:opacity-90"
-        >
-          CM FULL physical CSV
         </button>
       </div>
 
@@ -200,7 +216,6 @@ export default function PostSalesPage() {
                 <th className="text-left p-2">price</th>
                 <th className="text-left p-2">policy</th>
                 <th className="text-left p-2">sourceCode</th>
-                <th className="text-left p-2">stockClass</th>
                 <th className="text-left p-2">location</th>
                 <th className="text-left p-2">comment</th>
               </tr>
@@ -217,7 +232,6 @@ export default function PostSalesPage() {
                   <td className="p-2">{r.price}</td>
                   <td className="p-2">{r.policy}</td>
                   <td className="p-2">{r.sourceCode}</td>
-                  <td className="p-2">{r.stockClass}</td>
                   <td className="p-2">{r.location}</td>
                   <td className="p-2 max-w-[520px] truncate" title={r.comment}>
                     {r.comment}
