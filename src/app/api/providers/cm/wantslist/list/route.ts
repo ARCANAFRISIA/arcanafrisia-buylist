@@ -29,7 +29,7 @@ async function mkmFetchJson(url: string, method: "GET" | "POST" = "GET", body?: 
 
 export async function GET(_req: NextRequest) {
   try {
-    const url = "https://api.cardmarket.com/ws/v2.0/output.json/wantslist";
+    const url = "https://apiv2.cardmarket.com/ws/v2.0/output.json/wantslist";
     const data = await mkmFetchJson(url, "GET");
 
     // Normaliseer een beetje

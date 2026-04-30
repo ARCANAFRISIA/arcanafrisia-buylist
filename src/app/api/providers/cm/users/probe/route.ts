@@ -37,7 +37,7 @@ export async function GET(req: Request) {
     const idOrName = urlReq.searchParams.get("idOrName") ?? "ArcanaFrisia";
 
     // 🔹 LET OP: GEEN output.json hier, exact zoals in de docs voor /users
-    const endpoint = `https://api.cardmarket.com/ws/v2.0/users/${encodeURIComponent(idOrName)}`;
+    const endpoint = `https://apiv2.cardmarket.com/ws/v2.0/users/${encodeURIComponent(idOrName)}`;
     const data = await mkmFetchJson(endpoint);
 
     return NextResponse.json({ ok: true, idOrName, data });

@@ -40,7 +40,7 @@ async function mkmRequest(method: Method, url: string, body?: string) {
 export async function POST() {
   try {
     // 1) Alle wantslists ophalen (JSON-variant)
-    const listUrl = "https://api.cardmarket.com/ws/v2.0/output.json/wantslist";
+    const listUrl = "https://apiv2.cardmarket.com/ws/v2.0/output.json/wantslist";
     const listResp = await mkmRequest("GET", listUrl);
 
     if (!listResp.ok) {
@@ -87,7 +87,7 @@ export async function POST() {
       const itemCount =
         typeof wl.itemCount === "number" ? wl.itemCount : null;
 
-      const deleteUrl = `https://api.cardmarket.com/ws/v2.0/wantslist/${id}`;
+      const deleteUrl = `https://apiv2.cardmarket.com/ws/v2.0/wantslist/${id}`;
       const delResp = await mkmRequest("DELETE", deleteUrl);
 
       results.push({

@@ -111,7 +111,7 @@ export async function GET(req: Request) {
 
     while (true) {
       // ✅ Cardmarket endpoint werkt offset-based
-      const endpoint = `https://api.cardmarket.com/ws/v2.0/output.json/orders/${actor}/${state}/${cursor}`;
+      const endpoint = `https://apiv2.cardmarket.com/ws/v2.0/output.json/orders/${actor}/${state}/${cursor}`;
       const payload = await mkmFetchJson(endpoint);
       const orders = getOrdersArray(payload);
       const count = orders.length;

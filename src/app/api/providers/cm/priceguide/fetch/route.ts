@@ -100,10 +100,10 @@ function extractCsvFromText(txt: string, contentType: string | null) {
 
 async function fetchPriceGuideCsv(): Promise<string> {
   const urls = [
-    "https://api.cardmarket.com/ws/v2.0/priceguide?idGame=1",
-    "https://api.cardmarket.com/ws/v2.0/output.json/priceguide?idGame=1",
-    "https://api.cardmarket.com/ws/v2.0/priceguide",
-    "https://api.cardmarket.com/ws/v2.0/output.json/priceguide",
+    "https://apiv2.cardmarket.com/ws/v2.0/priceguide?idGame=1",
+    "https://apiv2.cardmarket.com/ws/v2.0/output.json/priceguide?idGame=1",
+    "https://apiv2.cardmarket.com/ws/v2.0/priceguide",
+    "https://apiv2.cardmarket.com/ws/v2.0/output.json/priceguide",
   ] as const;
 
   const attempts: Array<{ url: string; mode: OAuthMode; realm: boolean }> = [];

@@ -55,7 +55,7 @@ async function mkmJsonRequest(
 
 export async function GET() {
   try {
-    const url = "https://api.cardmarket.com/ws/v2.0/output.json/account";
+    const url = "https://apiv2.cardmarket.com/ws/v2.0/output.json/account";
     const data = await mkmJsonRequest("GET", url);
 
     const acc = data.account;

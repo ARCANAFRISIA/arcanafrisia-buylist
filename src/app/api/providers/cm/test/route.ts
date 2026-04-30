@@ -54,7 +54,7 @@ function oauthHeaderCompat(method: "GET" | "POST", url: string) {
 }
 
 export async function GET() {
-  const url = "https://api.cardmarket.com/ws/v2.0/account";
+  const url = "https://apiv2.cardmarket.com/ws/v2.0/account";
   const res = await fetch(url, { headers: oauthHeaderCompat("GET", url), cache: "no-store" });
   const body = await res.text().catch(() => "");
   return NextResponse.json({ status: res.status, body: body.slice(0, 200) });

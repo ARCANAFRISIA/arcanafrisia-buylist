@@ -6,7 +6,7 @@ import prisma from "@/lib/prisma";
 import { buildOAuthHeader } from "@/lib/mkm";
 import { getPendingQtyByCardmarketId } from "@/lib/buylistPending";
 
-const BASE_URL = "https://api.cardmarket.com/ws/v2.0";
+const BASE_URL = "https://apiv2.cardmarket.com/ws/v2.0";
 const GAME_ID_MTGO = 1; // Magic
 
 // Sets die we NIET willen in arbitrage (ABU / collectors / rare promos)

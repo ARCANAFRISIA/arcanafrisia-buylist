@@ -19,7 +19,7 @@ export async function GET(req: Request) {
     const state = (url.searchParams.get("state") ?? "paid").toLowerCase();
     const start = Math.max(1, parseInt(url.searchParams.get("start") ?? "1", 10));
 
-    const endpoint = `https://api.cardmarket.com/ws/v2.0/output.json/orders/${actor}/${state}/${start}`;
+    const endpoint = `https://apiv2.cardmarket.com/ws/v2.0/output.json/orders/${actor}/${state}/${start}`;
     const data = await mkmFetchJson(endpoint);
 
     const arr: any[] =
